@@ -72,7 +72,7 @@ skip with NOT PROVEN in the optional profile and fail in the strict profile.
 | `forge-ci doctor` setup-check command | testsuite (`doctor_test.go`, recommendations and the calling-workflow check) + parent repository (`forge-ci/cmd/forge-ci/smoke_test.go`) |
 | `forge-ci setup status` step list, agreeing with doctor | testsuite (`setup_test.go`) |
 | `forge-ci docs` pages built into the binary | testsuite (`docs_test.go`) |
-| `plan release` runner-input refusal and `plan release-file-signing` (GPG or Cosign for checksums and SBOMs) | testsuite (`plan_release_test.go`) |
+| `plan release` runner-input refusal, the release APK of an Android application in the transfer plan, and `plan release-file-signing` (GPG or Cosign for checksums and SBOMs) | testsuite (`plan_release_test.go`) |
 | Exit-code classes, including 78 for a missing tool and 69 only for an unreachable host | testsuite (`cli_exit_codes_test.go`) |
 | `container validate artifacts` presence gate (JVM/npm container-packaging path) | testsuite (`container_validate_artifacts_test.go`) |
 | SLSA workflow-hardening validators: `validate isolation` (L3 job isolation), `validate event-context` (trigger allowlist), `validate job-graph` (masked-failure guard), `validate pin-reachability` (orphaned pins) | testsuite (`validate_isolation_test.go`, `validate_event_context_test.go`, `validate_job_graph_test.go`, `validate_pin_reachability_test.go`) |

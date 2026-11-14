@@ -50,6 +50,60 @@ func TestPlanRelease_RunnerInputsAreRequiredOnAForge(t *testing.T) {
 	}
 }
 
+// TestPlanRelease_AndroidApplicationCarriesItsAPK: a release of an Android
+// application downloads the release APK beside the AAB, so the application
+// can be installed from the release itself.
+func TestPlanRelease_AndroidApplicationCarriesItsAPK(t *testing.T) {
+	t.Parallel()
+
+	repo := writeArtifactsRepo(t, `
+artifacts:
+  - name: app
+    project-type: gradle-android
+    build-type: application
+    sboms: none
+    config:
+      java-version: 21
+      build-module: app
+      build-types: release
+`)
+	env := map[string]string{"CONFIG_PLAN_JSON": configPlanJSON(t, repo)}
+
+	stdout, stderr, code := run(t, runOpts{dir: repo, env: env}, "--provider", "local", "--runner", "local", "--json",
+		"plan", "release", "--tag", "v1.2.3", "--branch", "main", "--repository-visibility", "public")
+	if code != 0 {
+		t.Fatalf("plan release: exit %d: %s", code, stderr)
+	}
+
+	var out struct {
+		Transfers string `json:"artifact-transfer-plan-json"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, stdout)
+	}
+
+	var transfers struct {
+		Items []struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out.Transfers), &transfers); err != nil {
+		t.Fatalf("transfer plan is not JSON: %v\n%s", err, out.Transfers)
+	}
+
+	got := map[string]bool{}
+	for _, item := range transfers.Items {
+		got[item.Kind+" "+item.Name] = true
+	}
+
+	for _, want := range []string{"build_artifact app", "build_artifact app-release"} {
+		if !got[want] {
+			t.Errorf("transfer plan lacks %q: %s", want, out.Transfers)
+		}
+	}
+}
+
 // TestPlanReleaseFileSigning_FollowsTheDeclaration: checksums and SBOMs are
 // signed with GPG only when the declaration says so, and with the Cosign key
 // otherwise, also when there is no declaration at all.
