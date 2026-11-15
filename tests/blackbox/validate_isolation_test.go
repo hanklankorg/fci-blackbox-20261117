@@ -246,3 +246,59 @@ jobs:
 
 	assertContains(t, "missing build job", stderr, `build job "build" is missing from workflow`)
 }
+
+// TestIsolation_PrepareCallPassesTheSignersSecrets: prepare-release.yml
+// refuses a release before its tag when a secret the release uses is not
+// configured, and sees only what its caller passes, so the gate refuses a
+// prepare call without a secret the sign job takes.
+func TestIsolation_PrepareCallPassesTheSignersSecrets(t *testing.T) {
+	t.Parallel()
+
+	const pin = "1111111111111111111111111111111111111111"
+
+	workflow := func(prepareSecrets string) string {
+		return `jobs:
+  prepare:
+    uses: examplescope/ci-layer/.forgejo/workflows/prepare-release.yml@` + pin + `
+` + prepareSecrets + `  build-and-release:
+    outputs:
+      dist-digest: ${{ steps.handoff.outputs.digest }}
+    steps: []
+  sign-and-publish:
+    uses: examplescope/ci-layer/.forgejo/workflows/sign-and-publish-release.yml@` + pin + `
+    with:
+      release-tag: ${{ needs.prepare.outputs.release-tag }}
+      release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
+      dist-digest: ${{ needs.build-and-release.outputs.dist-digest }}
+    secrets:
+      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+`
+	}
+
+	for _, test := range []struct {
+		name, secrets string
+		want          int
+	}{
+		{"passed", "    secrets:\n      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}\n", 0},
+		{"inherited", "    secrets: inherit\n", 0},
+		{"left out", "", exitValidation},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			wf := writeTempWorkflow(t, workflow(test.secrets))
+
+			_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf,
+				"--build-job", "build-and-release", "--sign-job", "sign-and-publish", "--prepare-job", "prepare",
+				"--dist-digest-output", "dist-digest", "--signing-secret", "GPG_SIGNING_KEY")
+			if code != test.want {
+				t.Fatalf("exit %d, expected %d\nstderr: %s", code, test.want, stderr)
+			}
+
+			if test.want != 0 {
+				assertContains(t, "prepare secrets", stderr, `prepare job "prepare" call site is missing secret GPG_SIGNING_KEY`)
+			}
+		})
+	}
+}

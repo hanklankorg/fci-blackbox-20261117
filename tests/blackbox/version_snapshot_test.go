@@ -124,6 +124,25 @@ func TestGenerateSnapshot_ComposesFromTagBranchSHA(t *testing.T) {
 			t.Fatalf("version = %q, want prefix %q — a pre-release or non-version tag was selected as the base", got, wantPrefix)
 		}
 	})
+
+	// npm, Cargo and GoReleaser parse the version as semver, which forbids
+	// '_' and a numeric identifier with a leading zero after a '.'.
+	t.Run("branch_characters_semver_rejects_become_dashes", func(t *testing.T) {
+		repo := initGitRepo(t, nil, func(repo string, runGit func(args ...string) error) {
+			seedCommit(t, repo, runGit)
+		})
+
+		stdout, stderr, code := run(t, runOpts{dir: repo},
+			"version", "generate-snapshot", "--ref-name", "fix_x/1.02")
+		if code != 0 {
+			t.Fatalf("generate-snapshot exit=%d stderr=%s", code, stderr)
+		}
+
+		const wantPrefix = "0.0.0-snapshot-fix-x-1-02-"
+		if got := strings.TrimSpace(stdout); !strings.HasPrefix(got, wantPrefix) {
+			t.Fatalf("version = %q, want prefix %q", got, wantPrefix)
+		}
+	})
 }
 
 // TestPlanSnapshotRelease_EmitsStageContracts covers `plan snapshot-release`, the planner that
