@@ -126,19 +126,19 @@ func TestGenerateSnapshot_ComposesFromTagBranchSHA(t *testing.T) {
 	})
 
 	// npm, Cargo and GoReleaser parse the version as semver, which forbids
-	// '_' and a numeric identifier with a leading zero after a '.'.
+	// '_' and a numeric identifier with a leading zero, as the 01 of a.01.b.
 	t.Run("branch_characters_semver_rejects_become_dashes", func(t *testing.T) {
 		repo := initGitRepo(t, nil, func(repo string, runGit func(args ...string) error) {
 			seedCommit(t, repo, runGit)
 		})
 
 		stdout, stderr, code := run(t, runOpts{dir: repo},
-			"version", "generate-snapshot", "--ref-name", "fix_x/1.02")
+			"version", "generate-snapshot", "--ref-name", "fix_x/a.01.b")
 		if code != 0 {
 			t.Fatalf("generate-snapshot exit=%d stderr=%s", code, stderr)
 		}
 
-		const wantPrefix = "0.0.0-snapshot-fix-x-1-02-"
+		const wantPrefix = "0.0.0-snapshot-fix-x-a-01-b-"
 		if got := strings.TrimSpace(stdout); !strings.HasPrefix(got, wantPrefix) {
 			t.Fatalf("version = %q, want prefix %q", got, wantPrefix)
 		}
