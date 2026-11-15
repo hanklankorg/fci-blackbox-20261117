@@ -35,7 +35,7 @@ func TestSBOMBuild_ReviewedGenerators(t *testing.T) {
 			}
 			args := []string{"build", tc.ecosystem, "run", "--sbom-tool-version", tc.generator}
 			if tc.ecosystem == "maven" {
-				args = append(args, "--build-type", "app", "--cli-opts", "-B -ntp")
+				args = append(args, "--build-type", "app", "--maven-cli-opts", "-B -ntp")
 			}
 			if _, stderr, code := run(t, runOpts{dir: proj}, args...); code != 0 {
 				t.Fatalf("build with generator %s: exit %d: %s", tc.generator, code, stderr)

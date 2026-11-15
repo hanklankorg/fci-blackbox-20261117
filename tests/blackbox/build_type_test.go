@@ -30,7 +30,7 @@ func TestBuildType_MavenApplication(t *testing.T) {
 	proj := copyTree(t, fixture("maven-hello"))
 
 	_, stderr, code := run(t, runOpts{dir: proj},
-		"build", "maven", "run", "--build-type", "app", "--cli-opts", "-B -ntp", "--build-sbom=false")
+		"build", "maven", "run", "--build-type", "app", "--maven-cli-opts", "-B -ntp", "--build-sbom=false")
 	if code != 0 {
 		t.Fatalf("build maven application exit %d\nstderr: %s", code, stderr)
 	}
@@ -59,7 +59,7 @@ func TestBuildType_MavenLibrary(t *testing.T) {
 	proj := copyTree(t, fixture("maven-lib"))
 
 	_, stderr, code := run(t, runOpts{dir: proj},
-		"build", "maven", "run", "--build-type", "lib", "--cli-opts", "-B -ntp", "--build-sbom=false")
+		"build", "maven", "run", "--build-type", "lib", "--maven-cli-opts", "-B -ntp", "--build-sbom=false")
 	if code != 0 {
 		t.Fatalf("build maven library exit %d\nstderr: %s", code, stderr)
 	}

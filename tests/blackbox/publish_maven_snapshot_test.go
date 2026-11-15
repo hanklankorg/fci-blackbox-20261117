@@ -65,7 +65,7 @@ func TestModernCentralPluginRoutesSnapshotsWithoutReleaseAuthorization(t *testin
 	// This row supplies its own settings. Maven takes the first --settings,
 	// so the harness's default MAVEN_ARGS settings must not shadow this file.
 	env := map[string]string{"MAVEN_CENTRAL_USERNAME": "fixture", "MAVEN_CENTRAL_PASSWORD": "synthetic-central-token", "MAVEN_ARGS": "-Dmaven.repo.local=" + filepath.Join(isolatedHome(), ".m2", "repository")}
-	args := []string{"publish", "maven-central", "deploy", "--snapshot", "--profile", "publish", "--settings-path", settings, "--cli-opts", "-Dfixture.registry=" + server.URL}
+	args := []string{"publish", "maven-central", "deploy", "--snapshot", "--profile", "publish", "--settings-path", settings, "--maven-cli-opts", "-Dfixture.registry=" + server.URL}
 	_, stderr, code := run(t, runOpts{dir: project, env: env}, append(append([]string{}, args...), "--validate-only")...)
 	if code != 0 || requests.Load() != 0 {
 		t.Fatalf("reactor preflight contacted the publisher or failed: requests=%d exit=%d: %s", requests.Load(), code, stderr)
@@ -99,7 +99,7 @@ func TestMavenSnapshotRefusesStableReactorBeforeUpload(t *testing.T) {
 	}))
 	defer server.Close()
 	project := copyTree(t, fixture("maven-snapshot-guard"))
-	_, stderr, code := run(t, runOpts{dir: project}, "publish", "maven-central", "deploy", "--snapshot", "--profile", "publish", "--cli-opts", "-Dfixture.registry="+server.URL)
+	_, stderr, code := run(t, runOpts{dir: project}, "publish", "maven-central", "deploy", "--snapshot", "--profile", "publish", "--maven-cli-opts", "-Dfixture.registry="+server.URL)
 	if code == 0 || !strings.Contains(stderr, "snapshot publication requires a -SNAPSHOT version") {
 		t.Fatalf("snapshot gate: %d: %s", code, stderr)
 	}
@@ -118,7 +118,7 @@ func TestMavenSnapshotRechecksCredentialActivatedProfiles(t *testing.T) {
 	defer server.Close()
 	project := copyTree(t, fixture("maven-environment-profile"))
 	opts := runOpts{dir: project, env: map[string]string{"MAVEN_CENTRAL_PASSWORD": "synthetic-profile-token"}}
-	args := []string{"publish", "maven-central", "deploy", "--snapshot", "--profile", "publish", "--cli-opts", "-Dfixture.registry=" + server.URL}
+	args := []string{"publish", "maven-central", "deploy", "--snapshot", "--profile", "publish", "--maven-cli-opts", "-Dfixture.registry=" + server.URL}
 	_, stderr, code := run(t, opts, append(append([]string{}, args...), "--validate-only")...)
 	if code != 0 {
 		t.Fatalf("secret-free preflight: %d: %s", code, stderr)
