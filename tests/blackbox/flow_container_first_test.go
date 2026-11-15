@@ -32,9 +32,12 @@ package blackbox
 
 import (
 	"debug/elf"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -325,5 +328,73 @@ func TestFlow_ContainerFirst_Go(t *testing.T) {
 		if out, err := verify.CombinedOutput(); err != nil {
 			t.Errorf("step 7 gpg --verify %s: %v\n%s", pair.asc, err, out)
 		}
+	}
+}
+
+// TestFlow_ContainerFirst_BuildSBOMHeldAtTheHandoff drives the path every
+// forge's container-first release takes: `sbom assemble --artifacts-config`
+// writes the planned artifact's build SBOM from its lockfile into a hand-off
+// directory, leaving the checkout clean, and `release files validate
+// --artifacts-config` refuses a hand-off whose SBOM bundle lacks it.
+func TestFlow_ContainerFirst_BuildSBOMHeldAtTheHandoff(t *testing.T) {
+	t.Parallel()
+
+	requireTool(t, "go")
+	requireTool(t, "cyclonedx-gomod")
+
+	const config = ".forge-ci/artifacts.yml"
+
+	for name, sboms := range map[string][]string{"declared": {"--sbom", "dist/sboms/*"}, "undeclared": nil} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			proj := copyTree(t, fixture("go-hello"))
+			writeHandoffFile(t, filepath.Join(proj, config),
+				"artifacts:\n  - name: go-hello\n    project-type: go\n    config:\n      build-mode: container-first\n")
+			writeHandoffFile(t, filepath.Join(proj, "dist", "go-hello-linux-amd64"), "binary\n")
+
+			if _, stderr, code := run(t, runOpts{dir: proj}, "sbom", "assemble", "--artifacts-config", config,
+				"--project-type", "go", "--version", "v0.1.0", "--output-dir", "dist/sboms"); code != 0 {
+				t.Fatalf("sbom assemble exit %d\nstderr: %s", code, stderr)
+			}
+
+			assertValidCycloneDXJSON(t, filepath.Join(proj, "dist", "sboms", "go-hello-0.1.0-build-sbom.cyclonedx.json"))
+
+			if _, err := os.Stat(filepath.Join(proj, ".forge-ci", "go-build-sbom")); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("sbom assemble left its working file in the checkout: %v", err)
+			}
+
+			declare := append([]string{"release", "files", "declare", "--project-name", "go-hello", "--version", "v0.1.0",
+				"--asset", "dist/go-hello-linux-amd64"}, sboms...)
+			if _, stderr, code := run(t, runOpts{dir: proj}, declare...); code != 0 {
+				t.Fatalf("declare exit %d\nstderr: %s", code, stderr)
+			}
+
+			_, stderr, code := run(t, runOpts{dir: proj}, "release", "files", "validate", "--unsigned", "--artifacts-config", config)
+			if sboms != nil {
+				if code != 0 {
+					t.Fatalf("validate refused the declared build SBOM, exit %d\nstderr: %s", code, stderr)
+				}
+
+				return
+			}
+
+			if code != exitValidation || !strings.Contains(stderr, "no build SBOM of the container-first go-hello") {
+				t.Fatalf("validate exit %d, want the missing build SBOM refused\nstderr: %s", code, stderr)
+			}
+		})
+	}
+}
+
+// writeHandoffFile writes one file of a test's project, creating its parents.
+func writeHandoffFile(t *testing.T, path, body string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
