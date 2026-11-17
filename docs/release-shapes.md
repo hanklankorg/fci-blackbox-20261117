@@ -18,7 +18,7 @@ a glibc-built artifact to execute directly on a musl controller.
 |---|---|---|---|
 | **artifact-first** | the built file itself (jar, tarball, cross-compiled binary), signed + attached to the release | maven-app, maven-lib, gradle, npm, go, cargo | `flow_artifact_first_test.go` |
 | **container-first (compiled)** | an image whose Containerfile *compiles* the binary; the binary is extracted from an `export-binary` stage as a byproduct | go, cargo only | `flow_container_first_test.go` |
-| **container-packaging** | an image that COPYs an already-built artifact in, with no binary extraction | maven-app, npm, gradle (plus any artifact-first ecosystem opting into a container) | `container_validate_artifacts_test.go` (the forge-ci presence gate; the buildah COPY itself is workflow glue) |
+| **container-packaging** | an image that COPYs an already-built artifact in, with no binary extraction | maven-app, npm, gradle (plus any artifact-first ecosystem opting into a container) | `container_validate_artifacts_test.go` (presence gate for JVM, Go and Cargo) and `container_extract_npm_tarball_test.go` (npm package arrival, extraction and consumption; the buildah COPY itself is workflow glue) |
 
 Two consequences explain what looks like missing coverage:
 
