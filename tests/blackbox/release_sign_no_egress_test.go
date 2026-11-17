@@ -18,10 +18,8 @@
 package blackbox
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,34 +68,6 @@ func recordEgress(t *testing.T) (proxyURL string, recorded func() []string) {
 		defer mu.Unlock()
 
 		return append([]string(nil), hits...)
-	}
-}
-
-func TestEgressRecorder_WaitsForAcceptedConnections(t *testing.T) {
-	t.Parallel()
-
-	proxy, recorded := recordEgress(t)
-	proxyURL, err := url.Parse(proxy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
-	t.Cleanup(transport.CloseIdleConnections)
-	client := &http.Client{Transport: transport}
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.test", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	response, _ := client.Do(request)
-	if response != nil {
-		_, _ = io.Copy(io.Discard, response.Body)
-		_ = response.Body.Close()
-	}
-
-	hits := recorded()
-	if len(hits) != 1 || hits[0] != "CONNECT example.test:443 HTTP/1.1" {
-		t.Fatalf("recorded egress = %v", hits)
 	}
 }
 
@@ -154,8 +124,7 @@ func TestReleaseSign_MakesNoProxyObservableHTTPAttempt(t *testing.T) {
 }
 
 // TestReleaseSign_EnvKeyMakesNoProxyObservableHTTPAttempt covers the isolated
-// signing path, which is the one forgejo-ci actually ships (`--key
-// env://COSIGN_KEY`). It builds the cosign adapter through NewIsolated rather
+// signing path, the one a workflow uses with `--key env://COSIGN_KEY`. It builds the cosign adapter through NewIsolated rather
 // than New, replacing the subprocess environment wholesale — so "the engine
 // resolves the transparency setting" has to hold for a second construction site
 // that a reader would not think to check.

@@ -51,9 +51,8 @@ func tlogEntryCount(t *testing.T, bundlePath string) int {
 // entries.
 //
 // Without the config this same path writes a real entry to the public log —
-// verified against cosign 3.1.1 — so this test is what keeps the suite (and
-// forgejo-ci's vendor gate, which runs it on every re-vendor) from publishing
-// on every run.
+// verified against cosign 3.1.1 — so this test is what keeps the suite from
+// publishing on every run.
 func TestReleaseSign_PublishesNoTlogEntry(t *testing.T) {
 	requireTool(t, "cosign")
 

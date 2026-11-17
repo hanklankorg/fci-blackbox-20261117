@@ -4,9 +4,8 @@
 //go:build blackbox
 
 // `container base-images` is the other half of the workflow-facing
-// orchestration boundary (see container_release_images_test.go). forgejo-ci
-// drives it from promote-base-container-images.yml and
-// verify-base-container-images.yml: it verifies Cosign signatures plus
+// orchestration boundary (see container_release_images_test.go). Base-image
+// promotion and verification workflows drive it: it verifies Cosign signatures plus
 // CycloneDX and SLSA lineage on a base image before promoting it to an
 // immutable tag.
 //

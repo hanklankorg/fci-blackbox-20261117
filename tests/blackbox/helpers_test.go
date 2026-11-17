@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -77,7 +78,12 @@ func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }
 
-// run invokes the forge-ci binary with args, returns combined output + exit code.
+// run invokes the forge-ci binary with args and returns its stdout, stderr and
+// exit code.
+//
+// The child runs in opts.dir, or in a fresh t.TempDir() when that is empty,
+// so no call can read or write the suite's own checkout by accident: a test
+// that needs a repository or fixture passes its directory explicitly.
 //
 // Each invocation gets a curated, minimal environment (PATH, an isolated
 // HOME, a fixed locale, a test git identity) instead of a copy of the
@@ -98,8 +104,13 @@ func run(t *testing.T, opts runOpts, args ...string) (stdout, stderr string, exi
 	// is killed through ctx, as on a timeout.
 	defer context.AfterFunc(suiteCtx, cancel)()
 
+	dir := opts.dir
+	if dir == "" {
+		dir = t.TempDir()
+	}
+
 	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Dir = opts.dir
+	cmd.Dir = dir
 	cmd.Env = isolatedEnv(opts.env)
 	killGroupOnCancel(cmd)
 
@@ -168,6 +179,31 @@ func outputOrFatal(t *testing.T, cmd *exec.Cmd) string {
 	return strings.TrimSpace(string(out))
 }
 
+// defaultRustupHome returns the real home's rustup directory when it exists.
+//
+// It is only consulted when RUSTUP_HOME is unset, which is the normal state:
+// rustup's installer puts its shims on PATH and lets the variable default to
+// $HOME/.rustup rather than exporting it. Every other install-location
+// passthrough here can rely on the variable being set; this one cannot.
+//
+// The caller's home is read before constructing the child's redirected HOME;
+// isolatedEnv does not change the process environment. Returning "" when absent
+// keeps non-rustup hosts (a distro cargo, a mise-managed toolchain) on the
+// existing path, where the variable is simply not set.
+func defaultRustupHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+
+	rustup := filepath.Join(home, ".rustup")
+	if info, err := os.Stat(rustup); err != nil || !info.IsDir() {
+		return ""
+	}
+
+	return rustup
+}
+
 // isolatedEnv builds the environment for one binary invocation: a
 // curated minimal base plus the supplied overrides. It hands the child
 // process a clean starting point instead of a copy of the developer's
@@ -202,31 +238,6 @@ func outputOrFatal(t *testing.T, cmd *exec.Cmd) string {
 // PATH gets a mise-augmented prefix: many developers manage node /
 // java / cargo via mise but haven't activated it in the shell that
 // invoked `go test`. `mise bin-paths` adds those installed toolchains.
-// defaultRustupHome returns the real home's rustup directory when it exists.
-//
-// It is only consulted when RUSTUP_HOME is unset, which is the normal state:
-// rustup's installer puts its shims on PATH and lets the variable default to
-// $HOME/.rustup rather than exporting it. Every other install-location
-// passthrough here can rely on the variable being set; this one cannot.
-//
-// The caller's home is read before constructing the child's redirected HOME;
-// isolatedEnv does not change the process environment. Returning "" when absent
-// keeps non-rustup hosts (a distro cargo, a mise-managed toolchain) on the
-// existing path, where the variable is simply not set.
-func defaultRustupHome() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-
-	rustup := filepath.Join(home, ".rustup")
-	if info, err := os.Stat(rustup); err != nil || !info.IsDir() {
-		return ""
-	}
-
-	return rustup
-}
-
 func isolatedEnv(extra map[string]string) []string {
 	procSwaps := os.Getenv("FORGE_CI_PROC_SWAPS")
 	if procSwaps == "" {
@@ -919,6 +930,66 @@ func appendStepSummary(path, title, body string) error {
 	return errors.Join(err, file.Close())
 }
 
+// parseGHAOutputs reads a $GITHUB_OUTPUT file written by the CLI's output
+// sink and returns its key→value pairs. It accepts the two encodings the
+// runner reads, scalar `key=value` lines and the multiline `key<<DELIM` …
+// `DELIM` form, and fails on anything else: a line the runner cannot parse,
+// or a key written twice, is a sink defect even when the key a test looks up
+// happens to hold the right value.
+func parseGHAOutputs(t *testing.T, path string) map[string]string {
+	t.Helper()
+
+	out := map[string]string{}
+	set := func(key, value string) {
+		t.Helper()
+
+		if _, dup := out[key]; dup {
+			t.Fatalf("%s: output %q is written more than once", path, key)
+		}
+
+		out[key] = value
+	}
+
+	lines := strings.Split(readFile(t, path), "\n")
+
+	for i := 0; i < len(lines); i++ {
+		if m := ghaHeredocRE.FindStringSubmatch(lines[i]); m != nil {
+			key, delim := m[1], m[2]
+
+			var buf []string
+			for i++; i < len(lines) && lines[i] != delim; i++ {
+				buf = append(buf, lines[i])
+			}
+
+			if i == len(lines) {
+				t.Fatalf("%s: heredoc %s for %q is never terminated", path, delim, key)
+			}
+
+			set(key, strings.Join(buf, "\n"))
+
+			continue
+		}
+
+		if m := ghaScalarRE.FindStringSubmatch(lines[i]); m != nil {
+			set(m[1], m[2])
+
+			continue
+		}
+
+		if lines[i] != "" {
+			t.Fatalf("%s:%d: %q is neither key=value nor key<<DELIM", path, i+1, lines[i])
+		}
+	}
+
+	return out
+}
+
+//nolint:gochecknoglobals // read-only compiled patterns for the $GITHUB_OUTPUT parser.
+var (
+	ghaHeredocRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)<<(\S+)$`)
+	ghaScalarRE  = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)=(.*)$`)
+)
+
 // configPlanJSON runs `--json config parse-artifacts` in dir against
 // .forge-ci/artifacts.yml and returns the plan JSON it carries.
 func configPlanJSON(t *testing.T, dir string) string {
@@ -1082,17 +1153,6 @@ var defaultSigstoreRootFixture = sync.OnceValue(func() string {
 	return suiteFixture(f.Name())
 })
 
-// Rekor containment. cosign signs against the public Sigstore config unless
-// told otherwise, which publishes a permanent, append-only, publicly queryable
-// entry for every signature — including the throwaway ones a test suite makes,
-// on every run, in CI, and in forgejo-ci's vendor gate. cosign 3.x deprecated
-// --tlog-upload in favour of a signing-config file with no transparency-log
-// service, and that file is what this builds: once per process, reused by every
-// invocation via isolatedEnv.
-//
-// Generated by cosign itself rather than hand-written, so the config's media
-// type and shape stay whatever the installed cosign understands.
-//
 // misePath returns base augmented with every directory reported by
 // `mise bin-paths` that isn't already in base. Result: a clean
 // shell `go test` invocation still sees mise-managed toolchains

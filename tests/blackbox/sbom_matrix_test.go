@@ -94,7 +94,7 @@ func TestSBOMBuildLayer_PromotesAcrossEcosystems(t *testing.T) {
 				"--version", "1.0.0",
 			)
 			if code != 0 {
-				t.Fatalf("sbom generate all exit %d\nstderr: %s", code, stderr)
+				t.Fatalf("sbom assemble exit %d\nstderr: %s", code, stderr)
 			}
 
 			out := filepath.Join(proj, tc.fixture+"-1.0.0-build-sbom.cyclonedx.json")
@@ -145,7 +145,7 @@ func TestSBOMBuildLayer_PromotesAcrossEcosystems(t *testing.T) {
 // analyzed-artifact layer for every ecosystem with a binary artifact
 // type. Each case materialises a stub artifact in the location
 // `findXxx()` (see internal/app/sbom/discovery.go) expects, runs
-// `sbom generate all --layers=analyzed-artifact`, and asserts that
+// `sbom assemble --layers=analyzed-artifact`, and asserts that
 // BOTH SPDX 2.3 and CycloneDX SBOMs are produced.
 //
 // Stubbing instead of "build the real thing": syft accepts minimal
@@ -226,7 +226,7 @@ func TestSBOMAnalyzedArtifact_BothFormatsAcrossEcosystems(t *testing.T) {
 				"--version", "1.0.0",
 			)
 			if code != 0 {
-				t.Fatalf("sbom generate all exit %d\nstderr: %s", code, stderr)
+				t.Fatalf("sbom assemble exit %d\nstderr: %s", code, stderr)
 			}
 
 			spdx := filepath.Join(proj, tc.expectSPDX)
@@ -263,7 +263,7 @@ func TestSBOMAnalyzedArtifact_BothFormatsAcrossEcosystems(t *testing.T) {
 }
 
 // TestSBOMBuildLayer_MissingBOMFails verifies the negative path: when
-// no bom.json exists, `sbom generate all --layers=build` exits with
+// no bom.json exists, `sbom assemble --layers=build` exits with
 // a non-zero validation code rather than silently producing nothing.
 // This is the regression that turned "no SBOMs generated" from a
 // silent exit-0 into an explicit error.

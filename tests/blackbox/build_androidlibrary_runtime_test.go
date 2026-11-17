@@ -19,6 +19,8 @@ import (
 // Keep this native-only; ARM64 compatibility runs exclude this test.
 func TestAndroidLibraryBuildAndExportInPinnedRuntime(t *testing.T) {
 	requireTool(t, "buildah")
+	// The digest-pinned SDK image and its layers, a public build input.
+	allowEgress(t, "ghcr.io", "pkg-containers.githubusercontent.com")
 	project := copyGradleFixture(t, "android-library")
 	if err := copyFile(binPath, filepath.Join(project, "forge-ci"), 0o755); err != nil {
 		t.Fatal(err)

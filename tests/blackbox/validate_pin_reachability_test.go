@@ -18,15 +18,15 @@ import (
 	"testing"
 )
 
-// pinnedWorkflow writes a workflow whose sign job pins forgejo-ci at sha,
-// matching the `uses: fixture/forgejo-ci/....yml@<sha>` shape the
+// pinnedWorkflow writes a workflow whose sign job pins fixture/engine at sha,
+// matching the `uses: fixture/engine/....yml@<sha>` shape the
 // reachability scanner looks for. Returns the workflow path.
 func pinnedWorkflow(t *testing.T, sha string) string {
 	t.Helper()
 
 	return writeTempWorkflow(t, fmt.Sprintf(`jobs:
   sign:
-    uses: fixture/forgejo-ci/.forgejo/workflows/sign.yml@%s
+    uses: fixture/engine/.forgejo/workflows/sign.yml@%s
 `, sha))
 }
 
@@ -56,13 +56,13 @@ func TestPinReachability_ReachablePasses(t *testing.T) {
 	wf := pinnedWorkflow(t, reachable)
 
 	_, stderr, code := run(t, runOpts{},
-		"validate", "pin-reachability", "--repo-dir", repo, "--subject", "forgejo-ci", "--main", "main", "--workflow", wf)
+		"validate", "pin-reachability", "--repo-dir", repo, "--subject", "engine", "--main", "main", "--workflow", wf)
 
 	if code != 0 {
 		t.Fatalf("expected exit 0 for reachable pin, got %d\nstderr: %s", code, stderr)
 	}
 
-	assertContains(t, "reachable pin", stderr, "All forgejo-ci pins are reachable")
+	assertContains(t, "reachable pin", stderr, "All engine pins are reachable")
 }
 
 // TestPinReachability_OrphanedFails: a pin to a commit no longer reachable
@@ -74,7 +74,7 @@ func TestPinReachability_OrphanedFails(t *testing.T) {
 	wf := pinnedWorkflow(t, orphan)
 
 	_, stderr, code := run(t, runOpts{},
-		"validate", "pin-reachability", "--repo-dir", repo, "--subject", "forgejo-ci", "--main", "main", "--workflow", wf)
+		"validate", "pin-reachability", "--repo-dir", repo, "--subject", "engine", "--main", "main", "--workflow", wf)
 
 	if code != exitValidation { // EX_VALIDATION: orphaned pin
 		t.Fatalf("expected EX_VALIDATION=1 for orphaned pin, got %d\nstderr: %s", code, stderr)
@@ -104,7 +104,7 @@ func TestPinReachability_SHA256(t *testing.T) {
 			}
 
 			_, stderr, code := run(t, runOpts{}, "validate", "pin-reachability",
-				"--repo-dir", repo, "--subject", "fixture/forgejo-ci", "--main", "main",
+				"--repo-dir", repo, "--subject", "fixture/engine", "--main", "main",
 				"--workflow", pinnedWorkflow(t, scenario.pin))
 			if code != scenario.code {
 				t.Fatalf("SHA-256 pin check: exit %d, want %d: %s", code, scenario.code, stderr)

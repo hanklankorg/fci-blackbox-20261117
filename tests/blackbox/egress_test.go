@@ -15,7 +15,7 @@ package blackbox
 // environment bypasses it silently, which is the accepted trade for
 // needing no privileges and no vendored dependencies. The fixtures are
 // lockfile-only, so a cold cache legitimately resolves from the public
-// registries named in egressAllowedHosts; anything else is refused at
+// registries named in egressBaseAllowedHosts; anything else is refused at
 // the proxy (the fetching test fails with a named host) and the suite
 // exits non-zero listing every violation next to the verdict.
 //
@@ -49,8 +49,11 @@ var (
 )
 
 // egressBaseAllowedHosts is what the lockfile-only fixtures legitimately
-// need on a cold cache, plus where the suite fetches its own inputs.
-// A ".suffix" entry allows the domain and every subdomain.
+// need on a cold cache: public package registries and toolchain downloads.
+// Forge APIs and container registries are not on it, so a forge-ci call that
+// reaches one is a violation; a test that needs one widens the list for
+// itself with allowEgress. A ".suffix" entry allows the domain and every
+// subdomain.
 func egressBaseAllowedHosts() []string {
 	return []string{
 		// Go modules.
@@ -68,19 +71,16 @@ func egressBaseAllowedHosts() []string {
 		// Maven Central.
 		"repo.maven.apache.org", "repo1.maven.org",
 		// Gradle distributions + plugin portal, Android SDK/AGP artifacts.
+		// services.gradle.org redirects a distribution download to its GitHub
+		// release asset, hence the two GitHub download hosts.
 		".gradle.org", "dl.google.com", "maven.google.com",
+		"github.com", "release-assets.githubusercontent.com",
 		// Docker Hub auth, registry, and the blob CDNs a cold pull is
 		// redirected to. Both are listed: Docker serves blobs from
 		// CloudFront today and from Cloudflare historically, and which one
 		// a pull is sent to is Docker's choice, not the caller's.
 		"auth.docker.io", "registry-1.docker.io",
 		"production.cloudflare.docker.com", "production.cloudfront.docker.com",
-		// GitHub, for tool and fixture inputs the suite itself fetches.
-		"github.com", "api.github.com", "codeload.github.com",
-		"objects.githubusercontent.com", "release-assets.githubusercontent.com",
-		"raw.githubusercontent.com",
-		// Digest-pinned Android SDK runtime and its image layers.
-		"ghcr.io", "pkg-containers.githubusercontent.com",
 		// AGP's sources/javadoc publication links these platform API references.
 		"developer.android.com", "docs.oracle.com", "kotlinlang.org",
 		// Syft's Java archive catalog data.
@@ -88,37 +88,9 @@ func egressBaseAllowedHosts() []string {
 	}
 }
 
-func TestEgressBaseAllowedHosts_DockerHubColdPullEndpointsAreExact(t *testing.T) {
-	t.Parallel()
-
-	allow := egressBaseAllowedHosts()
-	for _, host := range []string{
-		"auth.docker.io",
-		"registry-1.docker.io",
-		"production.cloudflare.docker.com",
-		"production.cloudfront.docker.com",
-	} {
-		if !egressHostAllowedBy(host, allow) {
-			t.Errorf("Docker Hub cold-pull endpoint %q is not allowed", host)
-		}
-	}
-	for _, host := range []string{
-		"docker.io",
-		"evil.auth.docker.io",
-		"registry-1.docker.io.attacker.example",
-		"unreviewed.cloudflare.docker.com",
-		"unreviewed.cloudfront.docker.com",
-		"production.cloudfront.docker.com.attacker.example",
-	} {
-		if egressHostAllowedBy(host, allow) {
-			t.Errorf("unreviewed Docker host %q is allowed", host)
-		}
-	}
-}
-
 // TestEgressHostAllowedBy_WildcardEntriesMatchOnADotBoundary covers the
-// allowlist's other half. The exact entries are pinned above; the ".suffix.tld"
-// form is the security-sensitive one, because it is where a naive matcher lets
+// allowlist's matching rule. The ".suffix.tld" form is the security-sensitive
+// one, because it is where a naive matcher lets
 // an attacker-controlled parent domain through — and it is the form
 // BLACKBOX_EGRESS_ALLOW hands to operators.
 //
@@ -164,7 +136,6 @@ type egressTally struct {
 //nolint:gochecknoglobals // suite-wide audit: the proxy records, TestMain reports.
 var egress = struct {
 	tally egressTally
-	allow []string
 }{tally: egressTally{seen: map[string]int{}, violations: map[string]int{}}}
 
 // egressProxy starts the recording proxy on first use and returns its
@@ -196,14 +167,6 @@ func validateEgressAuditStartup(addr string, startupErr error) error {
 }
 
 func startEgressProxy() (string, error) {
-	egress.allow = egressBaseAllowedHosts()
-
-	for _, host := range strings.Split(os.Getenv("BLACKBOX_EGRESS_ALLOW"), ",") {
-		if host = strings.TrimSpace(host); host != "" {
-			egress.allow = append(egress.allow, host)
-		}
-	}
-
 	listener, err := openEgressListener(os.Getenv("BLACKBOX_EGRESS_PROXY"), net.Listen)
 	if err != nil {
 		if !strictProfile() {
@@ -384,8 +347,32 @@ func auditEgressHost(host string) bool {
 	return allowed
 }
 
+// egressAllowEnv names the comma-separated extra hosts. The proxy reads it
+// on every request, so allowEgress can widen the list for one serial test.
+const egressAllowEnv = "BLACKBOX_EGRESS_ALLOW"
+
 func egressHostAllowed(host string) bool {
-	return egressHostAllowedBy(host, egress.allow)
+	return egressHostAllowedBy(host, append(egressBaseAllowedHosts(), egressExtraHosts()...))
+}
+
+func egressExtraHosts() []string {
+	var hosts []string
+
+	for _, host := range strings.Split(os.Getenv(egressAllowEnv), ",") {
+		if host = strings.TrimSpace(host); host != "" {
+			hosts = append(hosts, host)
+		}
+	}
+
+	return hosts
+}
+
+// allowEgress lets hosts through the proxy until t ends. The allowlist is
+// process-wide, so the widening goes through t.Setenv: Go refuses it in a
+// parallel test, and a serial test runs while no other test does.
+func allowEgress(t *testing.T, hosts ...string) {
+	t.Helper()
+	t.Setenv(egressAllowEnv, strings.Join(append(egressExtraHosts(), hosts...), ","))
 }
 
 func egressHostAllowedBy(host string, allowedHosts []string) bool {
@@ -468,7 +455,7 @@ func reportEgress(out io.Writer) int {
 		fmt.Fprintf(&report, "  %-40s %d attempt(s)\n", host, egress.tally.violations[host])
 	}
 
-	report.WriteString("Add legitimate hosts via BLACKBOX_EGRESS_ALLOW or egressBaseAllowedHosts.\n")
+	report.WriteString("Add legitimate hosts via " + egressAllowEnv + ", allowEgress in the test, or egressBaseAllowedHosts.\n")
 
 	_, _ = fmt.Fprintf(out, "\nEGRESS VIOLATIONS: %s", report.String())
 

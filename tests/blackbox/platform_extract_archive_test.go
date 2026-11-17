@@ -31,7 +31,7 @@ func TestPlatformExtractArchive_UnpacksXzWithoutTheHostsXz(t *testing.T) {
 	}
 
 	archive := filepath.Join(t.TempDir(), "tool.tar.xz")
-	if out, err := exec.Command("tar", "-cJf", archive, "-C", src, "tool-x86_64").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "tar", "-cJf", archive, "-C", src, "tool-x86_64").CombinedOutput(); err != nil {
 		t.Fatalf("tar: %v: %s", err, out)
 	}
 

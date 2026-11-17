@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -70,8 +71,11 @@ func TestDeriveRelease_RejectsInvalidRefs(t *testing.T) {
 	}
 }
 
-// --- G3: the Forgejo output sink emits the same keys as the GitHub one ---
-
+// TestDeriveRelease_ForgejoOutputSinkKeyParity derives the same release under
+// the GitHub and the Forgejo runner, each reading the ref from its own runner
+// variable and writing its own output file, and asserts the two files carry
+// identical key/value sets. Workflows on both forges read these names, so a
+// key that only one sink writes breaks the other forge's consumers.
 func TestDeriveRelease_ForgejoOutputSinkKeyParity(t *testing.T) {
 	t.Parallel()
 
@@ -83,33 +87,39 @@ func TestDeriveRelease_ForgejoOutputSinkKeyParity(t *testing.T) {
 		makeGPGSignedTag(t, runGit, repo, key, "release-request/v2.0.0")
 	})
 
-	outFile := filepath.Join(t.TempDir(), "forgejo-output")
-	_, stderr, code := run(t, runOpts{
-		dir: repo,
-		env: map[string]string{
-			"FORGE_CI_RUNNER":  "forgejo",
-			"FORGEJO_REF_NAME": "release-request/v2.0.0",
-			"FORGEJO_OUTPUT":   outFile,
-			"GNUPGHOME":        key.gnupgHome,
-		},
-	}, "version", "derive-release")
-	if code != 0 {
-		t.Fatalf("derive-release (forgejo sink) exit %d\nstderr: %s", code, stderr)
+	derive := func(runner string) map[string]string {
+		prefix := strings.ToUpper(runner)
+		outFile := filepath.Join(t.TempDir(), runner+"-output")
+
+		_, stderr, code := run(t, runOpts{
+			dir: repo,
+			env: map[string]string{
+				"FORGE_CI_RUNNER":    runner,
+				prefix + "_REF_NAME": "release-request/v2.0.0",
+				prefix + "_OUTPUT":   outFile,
+				"GNUPGHOME":          key.gnupgHome,
+			},
+		}, "version", "derive-release")
+		if code != 0 {
+			t.Fatalf("derive-release (%s sink) exit %d\nstderr: %s", runner, code, stderr)
+		}
+
+		return parseGHAOutputs(t, outFile)
 	}
 
-	// Same file format, same kebab-case keys as the GitHub sink asserted in
-	// the promote test — consumers read these names from workflow outputs.
-	outputs := parseGHAOutputs(t, outFile)
-	if outputs["release-tag"] != "v2.0.0" {
-		t.Errorf("release-tag = %q, want v2.0.0", outputs["release-tag"])
+	github, forgejo := derive("github"), derive("forgejo")
+	if !maps.Equal(github, forgejo) {
+		t.Errorf("sink outputs differ\ngithub:  %v\nforgejo: %v", github, forgejo)
 	}
 
-	if outputs["version"] != "2.0.0" {
-		t.Errorf("version = %q, want 2.0.0", outputs["version"])
-	}
-
-	if outputs["release-request"] != "release-request/v2.0.0" {
-		t.Errorf("release-request = %q, want release-request/v2.0.0", outputs["release-request"])
+	for k, want := range map[string]string{
+		"release-tag":     "v2.0.0",
+		"version":         "2.0.0",
+		"release-request": "release-request/v2.0.0",
+	} {
+		if forgejo[k] != want {
+			t.Errorf("%s = %q, want %q", k, forgejo[k], want)
+		}
 	}
 }
 
@@ -360,7 +370,7 @@ func TestCommitChangelogRelease_SignsPushesAndCleansUp(t *testing.T) {
 	}
 
 	host, port := prepareHostKeyServer(t, hostKey)
-	gitURL := "ssh://git@" + net.JoinHostPort(host, port) + "/itq/example.git"
+	gitURL := "ssh://git@" + net.JoinHostPort(host, port) + "/fixture/example.git"
 	fpFields := strings.Fields(outputOrFatal(t, toolCommand(t, "", nil, "ssh-keygen", "-lf", hostKey+".pub")))
 	if len(fpFields) < 2 {
 		t.Fatalf("ssh-keygen -lf: unexpected output %q", fpFields)
@@ -463,7 +473,7 @@ esac
 	wrongPin := strings.Fields(outputOrFatal(t, toolCommand(t, "", nil, "ssh-keygen", "-lf", signKey+".pub")))[1]
 	env["RELEASE_GIT_HOST_KEY_FINGERPRINT"] = wrongPin
 	_, stderr, code := run(t, runOpts{dir: repo, env: env}, "version", "commit-changelog-release",
-		"--tag", "v3.0.0", "--repository", "itq/example")
+		"--tag", "v3.0.0", "--repository", "fixture/example")
 	if code != exitValidation || !strings.Contains(stderr, "fingerprint mismatch") {
 		t.Fatalf("wrong host pin exit=%d, want fingerprint refusal: %s", code, stderr)
 	}
@@ -472,7 +482,7 @@ esac
 	}
 	env["RELEASE_GIT_HOST_KEY_FINGERPRINT"] = fingerprint
 	_, stderr, code = run(t, runOpts{dir: repo, env: env}, "version", "commit-changelog-release",
-		"--tag", "v3.0.0", "--repository", "itq/example")
+		"--tag", "v3.0.0", "--repository", "fixture/example")
 	if code != 0 {
 		t.Fatalf("commit-changelog-release exit %d\nstderr: %s", code, stderr)
 	}

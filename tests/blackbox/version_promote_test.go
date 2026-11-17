@@ -159,8 +159,8 @@ func TestReleasePromote_RequestTagBecomesImmutableReleaseTag(t *testing.T) {
 		dir: repo,
 		env: map[string]string{"GNUPGHOME": key.gnupgHome, "RELEASE_TAG": "v1.0.0"},
 	}, "version", "tag-release")
-	if code == 0 {
-		t.Fatalf("tag-release moved the release tag onto a later commit; must refuse\nstderr: %s", stderr)
+	if code != exitValidation {
+		t.Fatalf("tag-release on a later commit exit %d, want %d (validation)\nstderr: %s", code, exitValidation, stderr)
 	}
 
 	assertContains(t, "moved-HEAD refusal", stderr, "refusing to move it")

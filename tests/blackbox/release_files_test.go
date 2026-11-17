@@ -103,7 +103,7 @@ func TestReleaseFiles_AllowlistPublishesOnlyPublicAssets(t *testing.T) {
 	t.Parallel()
 
 	root := releaseFilesFixture(t)
-	manifest := "dist/forgejo-ci-release-files.json"
+	manifest := "dist/fixture-release-files.json"
 
 	_, stderr, code := run(t, runOpts{dir: root},
 		"release", "files", "collect", "--manifest", manifest, "--output", "assets.json")
@@ -205,7 +205,7 @@ func TestReleaseFiles_ChecksumCrossChecksFailClosed(t *testing.T) {
 	t.Parallel()
 
 	root := releaseFilesFixture(t)
-	manifest := "dist/forgejo-ci-release-files.json"
+	manifest := "dist/fixture-release-files.json"
 
 	if _, stderr, code := run(t, runOpts{dir: root},
 		"release", "files", "collect", "--manifest", manifest, "--output", "assets.json"); code != 0 {
@@ -231,8 +231,8 @@ func TestReleaseFiles_ChecksumCrossChecksFailClosed(t *testing.T) {
 	_, stderr, code := run(t, runOpts{dir: root},
 		"release", "files", "validate-checksums", "--manifest", manifest,
 		"--checksums-file", "dup_checksums.txt")
-	if code == 0 {
-		t.Fatal("duplicate checksum subject must fail")
+	if code != exitValidation {
+		t.Fatalf("duplicate checksum subject exit %d, want %d (validation)", code, exitValidation)
 	}
 
 	assertContains(t, "duplicate-subject rejection", stderr, "duplicate subjects")
@@ -247,8 +247,8 @@ func TestReleaseFiles_ChecksumCrossChecksFailClosed(t *testing.T) {
 	_, stderr, code = run(t, runOpts{dir: root},
 		"release", "files", "validate-checksums", "--manifest", manifest,
 		"--checksums-file", "nonpublic_checksums.txt")
-	if code == 0 {
-		t.Fatal("non-public checksum subject must fail")
+	if code != exitValidation {
+		t.Fatalf("non-public checksum subject exit %d, want %d (validation)", code, exitValidation)
 	}
 
 	assertContains(t, "non-public-subject rejection", stderr, "not public release assets")

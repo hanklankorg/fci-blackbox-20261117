@@ -50,25 +50,25 @@ func TestExitCodes_Matrix(t *testing.T) {
 		{
 			name:    "invalid_tag_format_is_EX_VALIDATION",
 			args:    []string{"validate", "tag", "format", "--tag", "vBOGUS"},
-			want:    1,
+			want:    exitValidation,
 			wantErr: `invalid tag format: "vBOGUS"`,
 		},
 		{
 			name:    "missing_required_flag_is_EX_USAGE",
 			args:    []string{"version", "bump"},
-			want:    2,
+			want:    exitUsage,
 			wantErr: `Required flags "project-type, version" not set`,
 		},
 		{
 			name:    "unknown_subcommand_is_EX_USAGE",
 			args:    []string{"this-subcommand-does-not-exist"},
-			want:    2,
+			want:    exitUsage,
 			wantErr: `unknown subcommand 'this-subcommand-does-not-exist'`,
 		},
 		{
 			name:    "unknown_project_type_is_EX_USAGE",
 			args:    []string{"version", "bump", "--project-type=java", "--version=1.0.0"},
-			want:    2,
+			want:    exitUsage,
 			wantErr: "unknown project type: java",
 		},
 		{
@@ -80,17 +80,17 @@ func TestExitCodes_Matrix(t *testing.T) {
 		// exit 0. This is the omission case: a workflow step that lost its last
 		// path segment would otherwise pass green having done nothing, and no
 		// surface-level check catches it (the verb path still exists, so
-		// forgejo-ci's CLI-invocation contract is satisfied).
+		// a check that workflow call sites resolve to real commands is satisfied).
 		{
 			name:    "bare_group_is_EX_USAGE",
 			args:    []string{"validate", "tag"},
-			want:    2,
+			want:    exitUsage,
 			wantErr: `"tag" requires a subcommand`,
 		},
 		{
 			name:    "bare_nested_group_is_EX_USAGE",
 			args:    []string{"container", "ledger"},
-			want:    2,
+			want:    exitUsage,
 			wantErr: `"ledger" requires a subcommand`,
 		},
 		// The root is no exemption: `forge-ci` alone prints a short start card
@@ -99,7 +99,7 @@ func TestExitCodes_Matrix(t *testing.T) {
 		{
 			name:    "bare_root_is_EX_USAGE_with_a_start_card",
 			args:    []string{},
-			want:    2,
+			want:    exitUsage,
 			wantErr: "START HERE",
 		},
 	}

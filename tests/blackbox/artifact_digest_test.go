@@ -13,7 +13,7 @@
 // scheme, and the pair actually wired into the cross-job tamper-evidence
 // channel, where the producer emits the digest as a job output and the
 // signer re-derives and compares. `artifact digest` has no caller in the
-// engine's own workflows or in forgejo-ci; it is offered to adopters who
+// engine's own workflows; it is offered to adopters who
 // want a strict content digest inside their own flow.
 //
 // The tests assert the properties this verb does have: the digest is

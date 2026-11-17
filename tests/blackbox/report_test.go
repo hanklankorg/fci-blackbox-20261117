@@ -78,9 +78,9 @@ func TestReportStageResult_Aggregation(t *testing.T) {
 		// cancelled must report failure — an orchestrator that reads
 		// "cancelled" may treat it as benign and carry on.
 		//
-		// Both key orderings are pinned because Go map iteration is randomised:
-		// an implementation that took the last-seen result rather than the
-		// highest-priority one would be flaky in production, passing most runs.
+		// The failure sits on each target in turn: an implementation that
+		// reported the first or the last target's result instead of the
+		// highest-priority one passes one of these two rows and fails the other.
 		{"failure_beats_cancelled", `{"maven":{"result":"failure"},"npm":{"result":"cancelled"}}`, "true", "failure"},
 		{"failure_beats_cancelled_reversed", `{"maven":{"result":"cancelled"},"npm":{"result":"failure"}}`, "true", "failure"},
 		{"missing_record_fails_closed", `{"maven":{"result":"success"}}`, "true", "failure"},
@@ -253,14 +253,14 @@ func TestReportQualityCheck_AggregatesPassFail(t *testing.T) {
 
 		_, stderr, code := run(t, runOpts{dir: t.TempDir(), env: s.env},
 			"report", "status", "quality-check",
-			"nanolinter|true|success", "swiftlint|true|failure",
+			"lint-a|true|success", "swiftlint|true|failure",
 			"reuse|false|success", "megalint|true|skipped")
 		if code != 0 {
 			t.Fatalf("quality-check (summary-only, never fails) exit %d\nstderr: %s", code, stderr)
 		}
 
 		body := readFile(t, s.summary)
-		for _, want := range []string{"nanolinter", "swiftlint", "Some checks failed"} {
+		for _, want := range []string{"lint-a", "swiftlint", "Some checks failed"} {
 			assertContains(t, "summary", body, want)
 		}
 	})
@@ -270,7 +270,7 @@ func TestReportQualityCheck_AggregatesPassFail(t *testing.T) {
 
 		_, _, code := run(t, runOpts{dir: t.TempDir(), env: s.env},
 			"report", "status", "quality-check",
-			"nanolinter|true|success", "reuse|false|success")
+			"lint-a|true|success", "reuse|false|success")
 		if code != 0 {
 			t.Fatalf("quality-check exit %d", code)
 		}

@@ -184,8 +184,8 @@ func TestContainerLedger_PromoteRefusesARepushedCandidate(t *testing.T) {
 		"--tag", "v1.2.3",
 		"--stage", "dev",
 	)
-	if code == 0 {
-		t.Fatalf("promote accepted a re-pushed candidate\nstderr: %s", stderr)
+	if code != exitValidation {
+		t.Fatalf("promote of a re-pushed candidate exit %d, want %d (validation)\nstderr: %s", code, exitValidation, stderr)
 	}
 
 	// The message names the candidate and both digests, so an operator can see

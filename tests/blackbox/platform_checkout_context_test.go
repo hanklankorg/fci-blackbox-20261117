@@ -43,6 +43,20 @@ func checkoutMetadataServer(t *testing.T, serverName string, requests chan<- che
 	return server
 }
 
+// objectFormatRefusal reports whether code is the refusal the metadata
+// preflight owes forge's server in mode. A format that disagrees with the ref
+// fails validation: GitHub reports none, so its SHA-1 default meets the SHA-256
+// ref, as does an explicit --object-format sha1. The unsupported format the
+// Forgejo and GitLab fakes report is malformed data; only the refusal is
+// asserted for it.
+func objectFormatRefusal(forge, mode string, code int) bool {
+	if forge == "github" || mode == "explicit object format" {
+		return code == exitValidation
+	}
+
+	return code != 0
+}
+
 func TestPlatformCheckout_MetadataUsesCheckoutContext(t *testing.T) {
 	t.Parallel()
 
@@ -107,7 +121,7 @@ func TestPlatformCheckout_MetadataUsesCheckoutContext(t *testing.T) {
 				}
 
 				_, stderr, code := run(t, runOpts{env: env}, args...)
-				if (code != exitUsage && code != exitValidation) || !strings.Contains(stderr, "object format") {
+				if !objectFormatRefusal(forge, mode, code) || !strings.Contains(stderr, "object format") {
 					t.Fatalf("metadata preflight: exit=%d stderr=%s", code, stderr)
 				}
 				if strings.Contains(stderr, "ambient-canary") || strings.Contains(stderr, "operator-canary") {

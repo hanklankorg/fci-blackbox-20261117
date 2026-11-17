@@ -6,7 +6,7 @@
 // Black-box coverage for `release dist-digest` and `release
 // prepare-dist` — the release hand-off digest. dist-digest prints the
 // SHA-256 of the sorted sha256sum manifest for a dist directory, byte-
-// compatible with forgejo-ci's dist-digest.sh; prepare-dist prunes and
+// compatible with the sha256sum shell pipeline; prepare-dist prunes and
 // digests the hand-off and emits digest=<sha> to the CI output sink
 // before upload. The tests assert tamper detection, the shell-pipeline
 // byte-compatibility contract through --manifest-root, and that
@@ -39,7 +39,7 @@ func distDigest(t *testing.T, args ...string) string {
 	return strings.TrimSpace(stdout)
 }
 
-// shellDistDigest reproduces forgejo-ci's dist-digest.sh pipeline against
+// shellDistDigest reproduces the documented sha256sum pipeline against
 // dir, under LC_ALL=C so the sort order matches the Go implementation.
 func shellDistDigest(t *testing.T, dir string) string {
 	t.Helper()
@@ -76,7 +76,7 @@ func TestDistDigest_DetectsTamper(t *testing.T) {
 }
 
 // TestDistDigest_ByteCompatibleWithShellPipeline pins the documented
-// contract: the digest equals forgejo-ci's dist-digest.sh pipeline. It is
+// contract: the digest equals the sha256sum shell pipeline. It is
 // also the one test that passes --manifest-root through the CLI.
 func TestDistDigest_ByteCompatibleWithShellPipeline(t *testing.T) {
 	t.Parallel()

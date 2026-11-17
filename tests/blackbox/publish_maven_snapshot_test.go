@@ -100,7 +100,7 @@ func TestMavenSnapshotRefusesStableReactorBeforeUpload(t *testing.T) {
 	defer server.Close()
 	project := copyTree(t, fixture("maven-snapshot-guard"))
 	_, stderr, code := run(t, runOpts{dir: project}, "publish", "maven-central", "deploy", "--snapshot", "--profile", "publish", "--maven-cli-opts", "-Dfixture.registry="+server.URL)
-	if code == 0 || !strings.Contains(stderr, "snapshot publication requires a -SNAPSHOT version") {
+	if code != exitValidation || !strings.Contains(stderr, "snapshot publication requires a -SNAPSHOT version") {
 		t.Fatalf("snapshot gate: %d: %s", code, stderr)
 	}
 	if requests.Load() != 0 {
@@ -124,7 +124,7 @@ func TestMavenSnapshotRechecksCredentialActivatedProfiles(t *testing.T) {
 		t.Fatalf("secret-free preflight: %d: %s", code, stderr)
 	}
 	_, stderr, code = run(t, opts, args...)
-	if code == 0 || !strings.Contains(stderr, "snapshot publication requires a -SNAPSHOT version") {
+	if code != exitValidation || !strings.Contains(stderr, "snapshot publication requires a -SNAPSHOT version") {
 		t.Fatalf("credential-activated stable model was not refused: %d: %s", code, stderr)
 	}
 	if requests.Load() != 0 {
