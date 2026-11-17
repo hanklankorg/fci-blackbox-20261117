@@ -10,6 +10,10 @@ set -euo pipefail
 
 evidence_dir=${1:?usage: bound-evidence-bundle.sh EVIDENCE_DIR [ARTIFACT_LIMIT_BYTES]}
 artifact_limit=${2:-15728640}
+if [[ ! "$artifact_limit" =~ ^[1-9][0-9]*$ ]] || ! printf -v artifact_limit '%d' "$artifact_limit" 2>/dev/null; then
+  printf 'artifact limit must be a positive decimal integer within the shell integer range\n' >&2
+  exit 2
+fi
 seal_reserve=131072
 bundle_target=$artifact_limit
 if ((artifact_limit > seal_reserve)); then
