@@ -15,6 +15,7 @@ configuration.
 ├── justfile          ← dev-loop recipes (just verify / lint / test)
 ├── .golangci.yml     ← linter config, sets the blackbox build tag
 ├── .mise.toml        ← pinned toolchain and lint tools
+├── mise.lock         ← their download URLs and checksums
 ├── .github/workflows ← the compatibility workflow (docs/ci.md)
 ├── development/      ← Markdown lint config (rumdl)
 ├── LICENSES/         ← license texts; REUSE.toml maps them to files

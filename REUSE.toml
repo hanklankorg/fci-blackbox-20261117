@@ -14,10 +14,10 @@ precedence = "override"
 SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
 SPDX-License-Identifier = "CC0-1.0"
 
-# Go module manifest and lockfile, CC0-1.0: closest, as the toolchain
-# writes them without comments.
+# Go module manifest and lockfile and the mise lockfile, CC0-1.0: closest,
+# as the toolchains write them without comments.
 [[annotations]]
-path = ["go.mod", "go.sum"]
+path = ["go.mod", "go.sum", "mise.lock"]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
 SPDX-License-Identifier = "CC0-1.0"

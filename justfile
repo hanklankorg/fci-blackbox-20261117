@@ -65,11 +65,11 @@ help recipe="":
 # SETUP
 # ==================================================================================== #
 
-# ▪ Install the pinned development tools; network
+# ▪ Install the pinned development tools from mise.lock; network
 [group('setup')]
 install-dev-tools:
-    @mise install go java rust
-    @mise exec --no-deps go java rust -- mise install
+    @mise install --locked go java rust
+    @mise exec --no-deps go java rust -- mise install --locked
 
 # ==================================================================================== #
 # DEVELOPMENT - Composite gates
@@ -176,7 +176,6 @@ test-run filter *args:
 [doc('▪ Run the full lint suite')]
 [group('lint')]
 lint: _check-justfile lint-go-format lint-go-vet lint-go-golangci
-    @bash scripts/test-clean-cache.sh
 
 # Report the files that are not gofmt-clean.
 [doc('Check Go formatting')]

@@ -24,7 +24,7 @@ Install and activate [mise](https://mise.jdx.dev/getting-started.html) first.
 git clone https://github.com/diggsweden/forge-ci-blackbox-tests.git
 cd forge-ci-blackbox-tests
 mise trust
-mise install aqua:casey/just
+mise install --locked aqua:casey/just
 mise exec -- just install-dev-tools
 export FORGE_CI_TEST_SOURCE=/absolute/path/to/forge-ci-checkout
 ```

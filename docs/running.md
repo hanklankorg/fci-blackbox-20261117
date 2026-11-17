@@ -145,7 +145,8 @@ version probes and the suite binary build have tighter limits.
 run by the compatibility workflow before the suite. It compiles the package
 test binary but does not build forge-ci or run the suite. It:
 
-- checks active-workflow selection and the workflow's drift-target overrides;
+- runs the `scripts` Go tests, which check the active workflow's drift-target
+  overrides;
 - proves with negative probes against the compiled `TestMain` that
   `-test.run` and disabled strict egress auditing are rejected;
 - exercises bounded stream draining, per-file and aggregate evidence
@@ -169,7 +170,7 @@ The `justfile` wraps the same commands, in the shape the forge-ci repository
 uses. `just` on its own lists everything.
 
 ```bash
-just install-dev-tools                   # install the pinned tools (mise install)
+just install-dev-tools                   # install the locked, pinned tools
 just verify-fix                          # apply safe fixes, then lint and test
 just verify                              # lint + local suite, with skips shown
 just test                                # local suite; containers/downloads possible
@@ -191,14 +192,13 @@ evidence; they still run every selected test. Builds and tools write caches.
 Relative paths are resolved from the recipe working directory (normally this
 checkout) before Go or engine subprocesses change directories. Invalid paths
 fail before Go starts. It preserves an inherited `FORGE_CI_BLACKBOX_PROFILE`,
-including strict's refusal of test-selection flags. Direct
-`FORGE_CI_TEST_BINARY` overrides passed to `go test` should use an absolute
-path.
+including strict's refusal of test-selection flags. A
+`FORGE_CI_TEST_BINARY` passed to `go test` directly must be an absolute path;
+the suite refuses a relative one.
 
-`bash scripts/validate-strict-profile-contract.sh` also exercises engine selection
-through the compiled harness with inert compiler and executable stand-ins. It
-checks missing/invalid source inputs, renamed checkouts with spaces, binary
-precedence and build failures without building the real engine.
+`TestSelectEngine_PrefersBinaryAndBuildsOnlyAValidSource` covers engine
+selection without a compiler: missing and invalid source inputs, renamed
+checkouts with spaces, binary precedence and build failures.
 
 ## Common gotchas
 

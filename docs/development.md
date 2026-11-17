@@ -32,7 +32,7 @@
 
 ## Helpers
 
-All in `helpers_test.go` and `keys_test.go`:
+In `helpers_test.go`, `keys_test.go` and `faketool_test.go`:
 
 - `run(t, runOpts{dir, env}, args...)` runs the binary in an isolated
   environment.
@@ -43,6 +43,11 @@ All in `helpers_test.go` and `keys_test.go`:
 - `initGitRepo(t, env, configure)` makes a fresh repository with
   host-isolated git config.
 - `requireTool(t, "syft")` skips when the tool is unavailable.
+- `installFakeTools(t, "cosign")` puts a stand-in for a tool the engine runs
+  in a directory for the front of `PATH`. The stand-in is the test binary
+  itself, running the tool's behaviour from `fakeTools()`, and `fakeCalls`
+  returns what it was called with. A stand-in is never a written script;
+  `TestSubprocessHygiene_FakesAndEnvironments` checks that.
 
 What the isolated environment does is in
 [Host isolation and footprint](isolation.md).
@@ -63,8 +68,15 @@ table-driver complexity). Each exclusion carries its reason in the config.
 
 `.mise.toml` is the authority for runtime, lint, signing and SBOM-tool versions.
 Java, Rust, Syft, Cosign and the SBOM generators use the compatibility workflow's
-pins. Run `just install-dev-tools`, then `mise exec -- just lint` (or activate
-mise in the shell).
+pins. `mise.lock` holds each download's URL and checksum for linux-x64,
+linux-arm64 and macos-arm64, and `just install-dev-tools` installs with
+`--locked`, so a download that the lock does not name, or whose checksum
+differs, fails. Rust, installed by rustup, and the Go and Cargo tools, built
+from source, have no download entry; rustup and the Go and Cargo toolchains
+check what they fetch. After you change a version in `.mise.toml`, run
+`mise lock --platform linux-x64,linux-arm64,macos-arm64` and commit both files.
+Run `just install-dev-tools`, then `mise exec -- just lint` (or activate mise in
+the shell).
 
 Setup first installs Go, Java and Rust, then activates those pinned runtimes
 with `mise exec --no-deps` while installing the remaining tools. Cargo tools
