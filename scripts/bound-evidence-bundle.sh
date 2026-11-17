@@ -45,9 +45,6 @@ omit_above_limit forge-ci.sources.sha256 2097152
 omit_above_limit companion.sources.sha256 2097152
 omit_above_limit resolved-container-images.json 131072
 omit_above_limit resolved-container-images.error.txt 65536
-omit_above_limit tool-versions.json 65536
-omit_above_limit exercised-scenarios.txt 65536
-omit_above_limit exercised-command-groups.txt 65536
 omit_above_limit metadata.txt 65536
 
 bundle_size() {
@@ -62,9 +59,6 @@ for name in \
   resolved-container-images.error.txt \
   companion.sources.sha256 \
   forge-ci.sources.sha256 \
-  tool-versions.json \
-  exercised-command-groups.txt \
-  exercised-scenarios.txt \
   metadata.txt \
   strict-blackbox.jsonl; do
   size=$(bundle_size)

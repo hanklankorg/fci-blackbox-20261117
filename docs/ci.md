@@ -18,8 +18,8 @@ exact commit it resolved. It is not the immutable release gate.
 | Trigger | forge-ci ref tested | Purpose |
 |---|---|---|
 | `workflow_dispatch` (manual) | `forge-ci-repository` plus `forge-ci-ref`; empty values fall back to the defaults below | Ad-hoc validation, including coordinated repository forks |
-| `push` to any branch | the default target | Catch testsuite-side regressions |
-| `pull_request` into any branch | the default target | Pre-merge gate for testsuite changes |
+| `push` to `main` | the default target | Catch testsuite-side regressions |
+| `pull_request` | the default target | Pre-merge gate for testsuite changes |
 | `schedule` (04:00 UTC daily) | the default target | Catch regressions in forge-ci itself that landed since the last push |
 
 The default target is the `FORGE_CI_REPOSITORY` and `FORGE_CI_REF` repository
@@ -78,8 +78,9 @@ Limits and sealing:
 
 ## Floating inputs
 
-The Gradle distribution and fixture `FROM` references are compatibility
-inputs, not immutable release inputs: their upstream checksums/digests are not
+Every Gradle wrapper pins its distribution by version and SHA-256, so the
+wrapper verifies what it downloads. The fixture `FROM` references are
+compatibility inputs, not immutable release inputs: their digests are not
 stored in this repository and are not guessed. The workflow records Buildah's
 resolved image data for each run. These floating inputs are deliberately
 excluded from immutable release claims until independently verified pins are

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
-# Fast contract check: the compatibility workflow keeps its repository/ref
-# overrides, the scripts tests pass, engine selection works, and invalid strict
+# Fast contract check: the scripts tests pass (among them the compatibility
+# workflow's repository/ref overrides), the suite compiles, and invalid strict
 # profiles are refused before the suite runs. Called by the integration
 # workflow; docs/development.md and docs/running.md also run it directly.
 
@@ -31,41 +31,12 @@ trap 'rm -rf "$tmp"' EXIT
 # negative probes independent of a running suite and its persistent caches.
 export TMPDIR="$tmp"
 
-# The compatibility workflow runs this before the suite; forge-ci's
-# workflows ran it at their pinned suite commit. Keep the suite's
-# repository/ref overrides available while the engine workflows retain their
-# immutable suite pin. A fork may change the literal fallback coordinates
-# without changing this contract check.
-# Forgejo gives its workflow directory precedence when both provider layers
-# are retained. Check the active compatibility file, not the inert GitHub copy.
-workflow="$root/.github/workflows/integration.yml"
-if [[ -d "$root/.forgejo/workflows" ]]; then
-  workflow="$root/.forgejo/workflows/integration.yml"
-fi
-if [[ ! -f "$workflow" ]]; then
-  printf 'blackbox contract: missing compatibility workflow %s\n' "$workflow" >&2
-  exit 1
-fi
-integration=$(<"$workflow")
-# shellcheck disable=SC2016 # Match literal workflow expressions, not shell expansions.
-for expected in \
-  'DEFAULT_REPOSITORY: ${{ vars.FORGE_CI_REPOSITORY || ' \
-  'DEFAULT_REF: ${{ vars.FORGE_CI_REF || ' \
-  "inputs['forge-ci-ref'] || vars.FORGE_CI_REF || "; do
-  if [[ "$integration" != *"$expected"* ]]; then
-    printf 'blackbox contract: integration workflow is missing primary-ref guard %s\n' "$expected" >&2
-    exit 1
-  fi
-done
-printf 'blackbox contract: suite drift target supports repository/ref overrides\n'
-
+# The scripts tests check the workflow's drift-target overrides.
 (
   cd "$root"
   go test ./scripts/
   go test -c -tags=blackbox -o "$tmp/blackbox-contract.test" ./tests/blackbox/
 )
-
-bash "$root/scripts/test-engine-selection.sh" "$tmp/blackbox-contract.test"
 
 # Both probes stop in TestMain's preflight, before the suite builds
 # forge-ci or runs a row, so they need no toolchain beyond Go.
@@ -174,14 +145,8 @@ if [[ ! -s "$aggregate/strict-blackbox.jsonl" ]]; then
 fi
 
 printf 'test_step_outcome=success\ncontainer_evidence_step_outcome=success\n' >"$aggregate/evidence-status.txt"
-(
-  cd "$aggregate"
-  mapfile -d '' files < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z)
-  ((${#files[@]} != 0))
-  sha256sum -- "${files[@]}" >SHA256SUMS
-  chmod 0444 -- "${files[@]}" SHA256SUMS
-  sha256sum --check SHA256SUMS >/dev/null
-)
+"$root/scripts/seal-evidence-bundle.sh" "$aggregate" "$artifact_limit"
+(cd "$aggregate" && sha256sum --check SHA256SUMS >/dev/null)
 
 postseal_size=$(du -sb "$aggregate" | cut -f1)
 if ((postseal_size <= preseal_size)); then

@@ -10,8 +10,8 @@
 #
 # Trigger surface:
 #   - workflow_dispatch: manual run with forge-ci repository/ref inputs
-#   - push to any branch: catches testsuite-side regressions against the default target
-#   - pull_request into any branch: same, for PRs
+#   - push to main: catches testsuite-side regressions against the default target
+#   - pull_request: same, for PRs (a branch is tested once, through its PR)
 #   - schedule (daily): re-runs against the default ref to catch drift
 #
 # The default target is the FORGE_CI_REPOSITORY / FORGE_CI_REF repository
@@ -33,6 +33,7 @@ on: # yamllint disable-line rule:truthy
         default: ""
         type: string
   push:
+    branches: [main]
   pull_request:
   schedule:
     # 04:00 UTC daily — checks for integration drift between testsuite commits.
@@ -173,17 +174,15 @@ jobs:
             printf 'retention_days=30\n'
             printf 'evidence_class=compatibility-only\n'
             printf 'immutable_release_evidence=false\n'
-            printf 'gradle_distribution=compatibility-version-url-no-verified-checksum\n'
+            printf 'gradle_distribution=pinned-version-verified-sha256\n'
             printf 'container_from=compatibility-floating-tags-recorded-after-test\n'
-            printf 'go_test_timeout_minutes=35\n'
-            printf 'test_step_timeout_minutes=45\n'
-            printf 'job_timeout_minutes=90\n'
             printf 'test_events_capture=complete-lines-with-truncation-marker\n'
             printf 'oversized_evidence=omitted-with-bounded-record\n'
           } >"$EVIDENCE_DIR/metadata.txt"
 
-      # .mise.toml is the one authority for tool versions; the steps below
-      # install exactly what `just install-dev-tools` installs locally.
+      # .mise.toml is the one authority for tool versions and mise.lock for
+      # their download URLs and checksums; the steps below install exactly
+      # what `just install-dev-tools` installs locally.
       - name: Set up pinned mise
         timeout-minutes: 4
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
@@ -201,8 +200,8 @@ jobs:
         run: |
           set -euo pipefail
           mise trust
-          mise install go java rust
-          mise exec --no-deps go java rust -- mise install
+          mise install --locked go java rust
+          mise exec --no-deps go java rust -- mise install --locked
 
       - name: Install floor-checked distro Buildah
         timeout-minutes: 7
@@ -313,14 +312,7 @@ jobs:
               fi
             done
           } >"$status"
-          (
-            cd "$EVIDENCE_DIR"
-            mapfile -d '' files < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z)
-            ((${#files[@]} != 0))
-            sha256sum -- "${files[@]}" >SHA256SUMS
-            chmod 0444 -- "${files[@]}" SHA256SUMS
-          )
-          [[ $(du -sb "$EVIDENCE_DIR" | cut -f1) -le 15728640 ]]
+          "$GITHUB_WORKSPACE/forge-ci-blackbox-tests/scripts/seal-evidence-bundle.sh" "$EVIDENCE_DIR" 15728640
 
       - name: Retain sealed compatibility evidence
         id: evidence-upload
