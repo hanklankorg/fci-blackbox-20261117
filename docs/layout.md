@@ -33,7 +33,7 @@ which:
 |---|---|---|
 | Infra | a plain noun | `main_test.go`, `helpers_test.go`, `keys_test.go` |
 | Per-command | `<command-group>_<feature>_test.go` | `release_sign_cosign_test.go` |
-| Cross-verb | `flow_*_test.go`, or a named cross-cutting concern | `flow_artifact_first_test.go`, `reproducibility_test.go` |
+| Cross-verb | `flow_*_test.go`, or a named cross-cutting concern | `flow_artifact_first_test.go`, `cli_exit_codes_test.go` |
 
 `<command-group>` is the forge-ci command the file exercises, so
 `ls tests/blackbox` sorts the suite by command and a bare `ls` is the index.

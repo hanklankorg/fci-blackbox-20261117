@@ -59,3 +59,49 @@ func TestSBOMBuild_ReviewedGenerators(t *testing.T) {
 		})
 	}
 }
+
+// TestSBOMBuild_LockfileLayer runs `sbom build` for the two ecosystems whose
+// build-layer SBOM forge-ci generates from the lockfile, and asserts a
+// CycloneDX document describing the project lands where `sbom assemble`
+// harvests it. Go, whose go.mod requires cobra, must also list components.
+func TestSBOMBuild_LockfileLayer(t *testing.T) {
+	for _, tc := range []struct {
+		projectType, fixture, generator, bom, subject string
+		probe                                         []string
+		dependencies                                  bool
+	}{
+		{"go", "go-hello", "cyclonedx-gomod", ".forge-ci/go-build-sbom/go-hello/bom.json", "github.com/example/go-hello", []string{"go", "version"}, true},
+		{"cargo", "cargo-hello", "cargo-cyclonedx", "bom.json", "cargo-hello", []string{"cargo", "--version"}, false},
+	} {
+		t.Run(tc.projectType, func(t *testing.T) {
+			requireWorkingTool(t, tc.probe[0], tc.probe[1:]...)
+			requireTool(t, tc.generator)
+
+			proj := copyTree(t, fixture(tc.fixture))
+
+			// Existence afterwards is evidence of generation only if the file
+			// was absent before.
+			bomPath := filepath.Join(proj, tc.bom)
+			if fileExists(bomPath) {
+				t.Fatalf("fixture %s ships %s; the generation assertion cannot fail while it does", tc.fixture, tc.bom)
+			}
+
+			if _, stderr, code := run(t, runOpts{dir: proj},
+				"sbom", "build", "--project-type", tc.projectType, "--name", tc.fixture); code != 0 {
+				t.Fatalf("sbom build exit %d\nstderr: %s", code, stderr)
+			}
+
+			assertValidCycloneDXJSON(t, bomPath)
+			assertSBOMSubject(t, bomPath, tc.subject)
+
+			var bom struct {
+				Components []any `json:"components"`
+			}
+			decodeJSON(t, bomPath, readFile(t, bomPath), &bom)
+
+			if tc.dependencies && len(bom.Components) == 0 {
+				t.Errorf("%s lists no components, but the fixture has dependencies", tc.bom)
+			}
+		})
+	}
+}

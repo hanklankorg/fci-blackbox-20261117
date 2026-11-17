@@ -104,7 +104,7 @@ FORGE_CI_BLACKBOX_PROFILE=strict \
   go test -tags=blackbox -count=1 -timeout 35m ./tests/blackbox/...
 
 # Run one test (or one pattern):
-go test -tags=blackbox -count=1 -run TestFlow_ContainerFirst_Go -v ./tests/blackbox/
+go test -tags=blackbox -count=1 -run TestGoBuild_Reproducible -v ./tests/blackbox/
 ```
 
 The `//go:build blackbox` tag is the opt-in switch. Without `-tags=blackbox`,
@@ -174,7 +174,7 @@ just verify-fix                          # apply safe fixes, then lint and test
 just verify                              # lint + local suite, with skips shown
 just test                                # local suite; containers/downloads possible
 just test-strict                         # strict CI compatibility profile
-just test-run TestFlow_ContainerFirst_Go # tests matching a name filter
+just test-run TestGoBuild_Reproducible   # tests matching a name filter
 just test-binary /path/to/forge-ci       # test a pre-built binary (sets FORGE_CI_TEST_BINARY)
 just lint                                # justfile + gofmt checks, go vet, golangci-lint
 just lint-fix                            # format justfile/Go, apply golangci fixes

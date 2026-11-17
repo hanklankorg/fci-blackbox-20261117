@@ -15,9 +15,8 @@ import (
 // TestValidateJVMReproducibility_MavenPasses runs the new validator
 // against the maven-hello fixture (which sets
 // <project.build.outputTimestamp> in its POM) and asserts the
-// validator reports it as configured. Counterpart to the on-disk
-// reproducibility test in reproducibility_test.go — this one tests
-// the policy-check surface that the release-prerequisites stage runs.
+// validator reports it as configured: the policy-check surface that
+// the release-prerequisites stage runs.
 func TestValidateJVMReproducibility_MavenPasses(t *testing.T) {
 	t.Parallel()
 

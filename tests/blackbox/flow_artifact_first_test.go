@@ -48,7 +48,7 @@ func TestFlow_ArtifactFirst_MavenApp(t *testing.T) {
 		t.Fatalf("step 1 missing main jar at %s", mainJar)
 	}
 
-	// 2. sbom generate all --layers=analyzed-artifact
+	// 2. sbom assemble --layers=analyzed-artifact
 	//    (build-layer stubbing isn't part of this cascade — caller
 	//    runs cyclonedx-maven-plugin during the build, which this
 	//    fixture doesn't to keep the test under 30s; analyzed-
@@ -318,9 +318,6 @@ func TestFlow_ArtifactFirst_Gradle(t *testing.T) {
 // cross-compile platform-specific binaries, SBOM each one, checksum,
 // sign, verify. This is the path used by Go CLI releases where the
 // binary is the deliverable (not wrapped in a container).
-//
-// Distinct from container-first Go (covered by TestFlow_ContainerFirst_Go)
-// which compiles inside the Containerfile.
 func TestFlow_ArtifactFirst_GoBinary(t *testing.T) {
 	t.Parallel()
 

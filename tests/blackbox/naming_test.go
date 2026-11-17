@@ -70,7 +70,6 @@ func infraFiles() []string {
 func crossVerbFiles() []string {
 	return []string{
 		"cli_exit_codes_test.go",
-		"reproducibility_test.go",
 	}
 }
 

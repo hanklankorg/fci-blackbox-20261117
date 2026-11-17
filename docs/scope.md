@@ -35,18 +35,18 @@ releases, not in this repository. Keep the word "e2e" for those.
 
 ## Rebuild evidence
 
-The reproducibility fixtures build in separate source directories. Go uses
-independent compiler caches; Gradle reruns tasks with build/configuration caches
-disabled; Cargo uses locked dependencies and separate target directories.
-Dependency download caches remain suite-shared. The tests compare the complete
-fixture deliverables, not authenticated published releases or every artifact in
-a real project's release matrix.
-
-The scratch-container fixture disables the build cache and compares both image
-config IDs and exported OCI manifest digests, verifying each referenced config
-and layer blob against its digest. It does not claim byte equality of enclosing
-OCI tar archives, nor reproduce a third-party base image. Missing tools still
-skip with NOT PROVEN in the optional profile and fail in the strict profile.
+Reproducibility is tested where forge-ci owns the input that makes a build
+repeatable. `build go run` injects `SOURCE_DATE_EPOCH` into the binary, so the
+Go tests build in separate source directories with independent compiler caches
+and compare the binaries. `container build --source-date-epoch` clamps image
+timestamps, so a scratch image built through forge-ci is exported to fresh OCI
+layouts and the manifest digests are compared, after each config and layer blob
+is checked against its digest. Both also change the epoch and require a
+different result. Whether Maven, Gradle, Cargo or npm repeat their own outputs
+is the toolchain's property, not forge-ci's, and is not tested here; `validate
+jvm-reproducibility` covers the JVM project settings forge-ci checks. Missing
+tools still skip with NOT PROVEN in the optional profile and fail in the strict
+profile.
 
 ## Deliberate exclusions
 
@@ -63,7 +63,7 @@ skip with NOT PROVEN in the optional profile and fail in the strict profile.
 | Concern | Test location |
 |---|---|
 | Per-ecosystem build + SBOM behaviour against real toolchains | testsuite (this repository) |
-| Reproducibility of binary + container outputs | testsuite (`reproducibility_test.go`) |
+| Reproducibility of forge-ci-built Go binaries and container images | testsuite (`build_go_test.go`, `container_build_reproducibility_test.go`) |
 | `release sign --method=gpg` round-trip | testsuite (`release_sign_test.go`) |
 | `release sign --method=kms` + `validate artifact-signature` round-trip | testsuite (`release_sign_cosign_test.go`) |
 | `release sign --method=sigstore` (keyless via OIDC) | **not here**. Needs live Fulcio and Rekor; argv pinning is unit-tested in `forge-ci/internal/adapters/cosign` |

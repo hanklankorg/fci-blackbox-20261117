@@ -7,9 +7,8 @@
 // build-type-specific assertions (application vs pack/lib) live in
 // build_type_test.go.
 //
-// Cross-cutting NPM coverage (version bump, reproducibility, exit
-// codes) is in the matrix files (version_bump_matrix_test.go,
-// reproducibility_test.go, cli_exit_codes_test.go).
+// Cross-cutting NPM coverage (version bump, exit codes) is in the
+// matrix files (version_bump_matrix_test.go, cli_exit_codes_test.go).
 
 package blackbox
 
@@ -61,9 +60,6 @@ func TestSBOMNPM_AnalyzedArtifactEmitsBothFormats(t *testing.T) {
 	// is well-formed, not what it is a document of: an SBOM generated against
 	// a stale artifact left in the working directory would satisfy every check
 	// above while making a false claim about what shipped.
-	//
-	// The cargo tests already assert this via assertCycloneDXXMLComponent; the
-	// JSON layers had no equivalent until assertSBOMSubject.
 	//
 	// This test deliberately does not assert a non-empty component list. `npm
 	// pack` excludes lockfiles from tarballs, and syft enumerates JavaScript

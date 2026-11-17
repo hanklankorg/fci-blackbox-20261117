@@ -46,7 +46,7 @@ just test
 just test-strict
 
 # One test, or a pattern
-just test-run TestFlow_ContainerFirst_Go
+just test-run TestGoBuild_Reproducible
 
 # Select a different engine binary for one run
 just test-binary /path/to/forge-ci

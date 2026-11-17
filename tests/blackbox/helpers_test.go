@@ -1429,6 +1429,25 @@ func buildahStorageArgs() []string {
 	}
 }
 
+// buildahStorageConf writes a containers-storage.conf naming the isolated
+// store and returns its path, for CONTAINERS_STORAGE_CONF: forge-ci's own
+// Buildah calls take no storage flags, so the engine reaches the same store
+// runBuildah uses through the documented environment variable.
+func buildahStorageConf(t *testing.T) string {
+	t.Helper()
+
+	root := buildahRoot()
+	conf := filepath.Join(t.TempDir(), "storage.conf")
+	body := fmt.Sprintf("[storage]\ndriver = \"\"\ngraphroot = %q\nrunroot = %q\n",
+		filepath.Join(root, "storage"), filepath.Join(root, "run"))
+
+	if err := os.WriteFile(conf, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return conf
+}
+
 // runBuildah runs buildah with the isolated storage root, so it never
 // writes to the host's default container storage. Storage flags are
 // global and must precede the subcommand.
@@ -1642,39 +1661,5 @@ func assertValidSPDXJSON(t *testing.T, path string) {
 
 	if doc.SPDXID == "" {
 		t.Errorf("%s: SPDXID empty", path)
-	}
-}
-
-// assertCycloneDXXMLComponent parses a CycloneDX XML SBOM (what
-// cargo-cyclonedx emits) at path and asserts the root element, the
-// CycloneDX namespace, and the primary component name in <metadata>.
-// The namespace is checked by prefix so it stays valid across the
-// CycloneDX 1.x schema revisions.
-func assertCycloneDXXMLComponent(t *testing.T, path, wantComponent string) {
-	t.Helper()
-
-	var doc struct {
-		XMLName  xml.Name
-		Metadata struct {
-			Component struct {
-				Name string `xml:"name"`
-			} `xml:"component"`
-		} `xml:"metadata"`
-	}
-
-	if err := xml.Unmarshal([]byte(readFile(t, path)), &doc); err != nil { //nolint:musttag // xml.Name root field is idiomatically untagged; we read .Local manually.
-		t.Fatalf("parse CycloneDX XML %s: %v", path, err)
-	}
-
-	if doc.XMLName.Local != "bom" {
-		t.Errorf("%s: root element = %q, want bom", path, doc.XMLName.Local)
-	}
-
-	if !strings.HasPrefix(doc.XMLName.Space, "http://cyclonedx.org/schema/bom/") {
-		t.Errorf("%s: namespace = %q, want CycloneDX schema", path, doc.XMLName.Space)
-	}
-
-	if doc.Metadata.Component.Name != wantComponent {
-		t.Errorf("%s: metadata component = %q, want %q", path, doc.Metadata.Component.Name, wantComponent)
 	}
 }

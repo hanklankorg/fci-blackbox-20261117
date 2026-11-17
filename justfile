@@ -162,7 +162,7 @@ test-binary binary *args:
 # One row, or a family of them, by name: the loop once a failure is located.
 # Verbose already, because a single black-box row is worth reading in full.
 #
-#   just test-run TestFlow_ContainerFirst_Go
+#   just test-run TestGoBuild_Reproducible
 [doc('Test matching names; container, network')]
 [group('test')]
 test-run filter *args:

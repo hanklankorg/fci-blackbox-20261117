@@ -110,45 +110,6 @@ func TestGoBuild_MultiPlatformReproducible(t *testing.T) {
 	}
 }
 
-// TestGoSBOM_CISABuildLayer verifies the CISA "build" layer SBOM
-// for a Go project via cyclonedx-gomod. The generator writes a
-// CycloneDX JSON document under .forge-ci/go-build-sbom/<name>/
-// with components derived from go.mod.
-func TestGoSBOM_CISABuildLayer(t *testing.T) {
-	t.Parallel()
-
-	requireTool(t, "go")
-	requireTool(t, "cyclonedx-gomod")
-
-	proj := copyTree(t, fixture("go-hello"))
-
-	// copyTree copies the fixture verbatim, so "the file exists afterwards" is
-	// only evidence of generation if it was absent beforehand. Assert that,
-	// rather than trusting the fixture to stay clean.
-	bomPath := filepath.Join(proj, ".forge-ci", "go-build-sbom", "go-hello", "bom.json")
-	if fileExists(bomPath) {
-		t.Fatalf("fixture go-hello ships %s; the generation assertion below cannot fail while it does",
-			filepath.Join(".forge-ci", "go-build-sbom", "go-hello", "bom.json"))
-	}
-
-	_, stderr, code := run(t, runOpts{dir: proj},
-		"sbom", "build", "--project-type", "go", "--name", "go-hello")
-	if code != 0 {
-		t.Fatalf("sbom exit %d\nstderr: %s", code, stderr)
-	}
-
-	assertValidCycloneDXJSON(t, bomPath)
-
-	var bom struct {
-		Components []any `json:"components"`
-	}
-	decodeJSON(t, bomPath, readFile(t, bomPath), &bom)
-
-	if len(bom.Components) == 0 {
-		t.Errorf("no components — go.mod has cobra dep, so the SBOM should list it")
-	}
-}
-
 // TestGoSBOM_AnalyzedArtifact verifies the CISA "analyzed-artifact"
 // layer for Go via syft. After compile, syft analyses the resulting
 // binary and emits BOTH SPDX 2.3 and CycloneDX 1.6 documents.
