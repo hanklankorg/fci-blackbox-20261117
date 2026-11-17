@@ -4,9 +4,9 @@
 //go:build blackbox
 
 // Black-box coverage for `validate isolation`, which performs selected static
-// release-isolation checks. The artifact-producing build job must have no
-// access to signing secrets (those belong only to the separately-trusted signing job), and
-// every actions/checkout must set persist-credentials: false. This is
+// release-isolation checks. No job may reach a signing secret but the
+// prepare job, the sign job and a call of one of the layer's signer
+// workflows, and every actions/checkout must set persist-credentials: false. This is
 // pure static YAML analysis, so the fixtures are tiny inline workflows.
 // All output (the pass line and the violation annotations) goes to
 // stderr; assertions target message substrings, which are identical
@@ -33,7 +33,7 @@ func writeTempWorkflow(t *testing.T, body string) string {
 	return path
 }
 
-// TestIsolation_CleanWorkflowPasses: a build job with no signing secrets
+// TestIsolation_CleanWorkflowPasses: a job with no signing secrets
 // and a credential-less checkout satisfies the gate.
 func TestIsolation_CleanWorkflowPasses(t *testing.T) {
 	t.Parallel()
@@ -49,7 +49,7 @@ jobs:
       - run: make dist
 `)
 
-	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf, "--build-job", "build")
+	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf)
 
 	if code != 0 {
 		t.Fatalf("expected exit 0 for clean workflow, got %d\nstderr: %s", code, stderr)
@@ -58,8 +58,8 @@ jobs:
 	assertContains(t, "isolation pass", stderr, "Static release-isolation checks passed")
 }
 
-// TestIsolation_BuildJobSecretFails: a signing secret referenced anywhere
-// in the build job breaks release isolation.
+// TestIsolation_BuildJobSecretFails: a signing secret referenced in the
+// build job, which runs the project's code, breaks release isolation.
 func TestIsolation_BuildJobSecretFails(t *testing.T) {
 	t.Parallel()
 
@@ -75,23 +75,24 @@ jobs:
           persist-credentials: false
 `)
 
-	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf, "--build-job", "build")
+	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf)
 
 	if code != exitValidation { // EX_VALIDATION: isolation broken
 		t.Fatalf("expected EX_VALIDATION=1 for leaked secret, got %d\nstderr: %s", code, stderr)
 	}
 
 	assertContains(t, "secret leak", stderr, "references signing secret")
-	assertContains(t, "secret leak", stderr, "no access to signing keys")
+	assertContains(t, "secret leak", stderr, "never a job that runs the project's code")
 }
 
 // TestIsolation_FindsASecretWhereverItHides pins the REACH of the scan, which
-// the test above does not: it places its secret in the job-level `env`, so a
-// scanner narrowed to that one location would keep it green while missing every
-// other way a key reaches a build job.
+// the test above does not: it places its secret in the build job's `env`, so a
+// scanner narrowed to that one location or job would keep it green while
+// missing every other way a key reaches the project's code.
 //
-// A key can be interpolated into a `run:` script or passed through step-level
-// env, so findSecretRef must walk every scalar rather than fixed keys.
+// A key can be interpolated into a `run:` script, passed through step-level
+// env, inherited from the workflow env or given to any other job, so the scan
+// must walk every scalar of every job rather than fixed keys.
 //
 // Names come from the default --signing-secret list (RELEASE_GPG_PRIVATE_KEY,
 // RELEASE_GPG_PASSPHRASE, COSIGN_PRIVATE_KEY, COSIGN_PASSWORD). That list is
@@ -136,35 +137,45 @@ jobs:
         with:
           key: ${{ secrets.COSIGN_PRIVATE_KEY }}
 `},
+
+		{"inherited from the workflow env", `env:
+  KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+` + head + checkout},
+
+		{"given to a job other than the build", head + checkout + `  test:
+    runs-on: ubuntu-24.04
+    env:
+      KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+    steps: []
+`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, stderr, code := run(t, runOpts{}, "validate", "isolation",
-				"--workflow", writeTempWorkflow(t, tc.body), "--build-job", "build")
+				"--workflow", writeTempWorkflow(t, tc.body))
 
 			if code != exitValidation {
 				t.Errorf("a signing secret in the %s was not flagged: exit %d\nstderr: %s", tc.name, code, stderr)
 			}
 
-			assertContains(t, tc.name, stderr, "references signing secret")
+			assertContains(t, tc.name, stderr, "never a job that runs the project's code")
 		})
 	}
 
-	// The boundary in the other direction: the SIGNING job is where these
-	// secrets belong, so a secret there must not be flagged. Without this, a
-	// scanner that flagged every job in the file would satisfy every case
-	// above while making the gate unusable.
+	// The boundary in the other direction: a call of one of the layer's
+	// signer workflows is where these secrets belong, so a secret there must
+	// not be flagged. Without this, a scanner that flagged every reference
+	// would satisfy every case above while making the gate unusable.
 	_, stderr, code := run(t, runOpts{}, "validate", "isolation",
 		"--workflow", writeTempWorkflow(t, head+checkout+`  sign:
-    runs-on: ubuntu-24.04
-    env:
-      KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-    steps: []
-`), "--build-job", "build")
+    uses: examplescope/ci-layer/.forgejo/workflows/sign-container-images.yml@1111111111111111111111111111111111111111
+    secrets:
+      COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+`))
 	if code != 0 {
-		t.Errorf("a signing secret in the SIGN job was flagged; only --build-job is in scope: exit %d\nstderr: %s", code, stderr)
+		t.Errorf("a signing secret passed to a signer workflow call was flagged: exit %d\nstderr: %s", code, stderr)
 	}
 
-	assertContains(t, "secret in the sign job", stderr, "Static release-isolation checks passed")
+	assertContains(t, "secret in the signer call", stderr, "Static release-isolation checks passed")
 }
 
 // TestIsolation_PersistCredentialsFails: a checkout that doesn't disable
@@ -180,7 +191,7 @@ jobs:
       - uses: actions/checkout@v5
 `)
 
-	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf, "--build-job", "build")
+	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf)
 
 	if code != exitValidation { // EX_VALIDATION: isolation broken
 		t.Fatalf("expected EX_VALIDATION=1 for persisted credentials, got %d\nstderr: %s", code, stderr)
@@ -202,7 +213,7 @@ jobs:
           persist-credentials: true
 `)
 
-	if _, stderr, code = run(t, runOpts{}, "validate", "isolation", "--workflow", explicit, "--build-job", "build"); code != exitValidation {
+	if _, stderr, code = run(t, runOpts{}, "validate", "isolation", "--workflow", explicit); code != exitValidation {
 		t.Errorf("explicit persist-credentials: true was not flagged: exit %d\nstderr: %s", code, stderr)
 	}
 }
@@ -212,7 +223,7 @@ jobs:
 func TestIsolation_MissingWorkflowFlagIsUsageError(t *testing.T) {
 	t.Parallel()
 
-	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--build-job", "build")
+	_, stderr, code := run(t, runOpts{}, "validate", "isolation")
 
 	if code != exitUsage { // EX_USAGE: required flag missing
 		t.Fatalf("expected EX_USAGE=2 when --workflow omitted, got %d\nstderr: %s", code, stderr)
@@ -221,30 +232,25 @@ func TestIsolation_MissingWorkflowFlagIsUsageError(t *testing.T) {
 	assertContains(t, "usage", stderr, `Required flag "workflow" not set`)
 }
 
-// TestIsolation_MissingBuildJobIsRefused: a --build-job that names no job in
+// TestIsolation_MissingSignJobIsRefused: a --sign-job that names no job in
 // the workflow must not pass vacuously. A renamed job would otherwise turn the
-// gate into a check of nothing, and the release would proceed with the build
-// job unscanned.
-func TestIsolation_MissingBuildJobIsRefused(t *testing.T) {
+// signing checks into a check of nothing.
+func TestIsolation_MissingSignJobIsRefused(t *testing.T) {
 	t.Parallel()
 
 	wf := writeTempWorkflow(t, `name: release
 jobs:
-  compile:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
+  release:
+    uses: examplescope/ci-layer/.forgejo/workflows/sign-and-publish-release.yml@1111111111111111111111111111111111111111
 `)
 
-	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf, "--build-job", "build")
+	_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf, "--sign-job", "sign")
 
 	if code != exitValidation {
-		t.Fatalf("a build job the workflow does not have was accepted: exit %d\nstderr: %s", code, stderr)
+		t.Fatalf("a sign job the workflow does not have was accepted: exit %d\nstderr: %s", code, stderr)
 	}
 
-	assertContains(t, "missing build job", stderr, `build job "build" is missing from workflow`)
+	assertContains(t, "missing sign job", stderr, `sign job "sign" is missing from workflow`)
 }
 
 // TestIsolation_PrepareCallPassesTheSignersSecrets: prepare-release.yml
@@ -290,7 +296,7 @@ func TestIsolation_PrepareCallPassesTheSignersSecrets(t *testing.T) {
 			wf := writeTempWorkflow(t, workflow(test.secrets))
 
 			_, stderr, code := run(t, runOpts{}, "validate", "isolation", "--workflow", wf,
-				"--build-job", "build-and-release", "--sign-job", "sign-and-publish", "--prepare-job", "prepare",
+				"--sign-job", "sign-and-publish", "--prepare-job", "prepare",
 				"--dist-digest-output", "dist-digest", "--signing-secret", "GPG_SIGNING_KEY")
 			if code != test.want {
 				t.Fatalf("exit %d, expected %d\nstderr: %s", code, test.want, stderr)

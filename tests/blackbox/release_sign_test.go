@@ -66,37 +66,28 @@ func TestChecksums_RoundTripAndComplete(t *testing.T) {
 	}
 }
 
-// TestReleaseSign_WarnsOnEmptyMatch verifies the bug fix that prevents
-// `release sign` from silently exiting 0 with zero signatures when
-// every file in --release-artifacts-dir fails the extension filter
-// (bare binaries — which need --attach-artifacts instead).
-func TestReleaseSign_WarnsOnEmptyMatch(t *testing.T) {
+// TestReleaseSign_RefusesWhenGivenNothingToSign verifies that `release sign`
+// never exits 0 with zero signatures. It finds no files by itself, so a run
+// that names none and has no checksums file has nothing to sign; succeeding
+// would let a mis-wired release step publish unsigned files.
+func TestReleaseSign_RefusesWhenGivenNothingToSign(t *testing.T) {
 	t.Parallel()
 
 	requireTool(t, "gpg")
 	key := bootstrapGPGKey(t)
 
 	dir := t.TempDir()
-
-	ra := filepath.Join(dir, "release-artifacts")
-	if err := os.MkdirAll(ra, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(ra, "app-linux-amd64"), []byte("bare"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "app-linux-amd64"), []byte("bare"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	_, stderr, code := run(t, runOpts{
 		dir: dir,
 		env: key.signingEnv(t),
-	}, "release", "sign", "--release-artifacts-dir", "release-artifacts")
-	if code != 0 {
-		t.Fatalf("sign exit %d\nstderr: %s", code, stderr)
+	}, "release", "sign")
+	if code != exitUsage {
+		t.Fatalf("release sign named no file and found no checksums file: exit = %d, want %d (nothing to sign)\nstderr: %s", code, exitUsage, stderr)
 	}
-
-	// sign writes its info to stderr.
-	assertContains(t, "filter excludes everything", stderr, "no files in")
 }
 
 // TestReleaseSign_GPGSignsAndVerifies verifies a real GPG sign+verify cycle of an
@@ -124,12 +115,12 @@ func TestReleaseSign_GPGSignsAndVerifies(t *testing.T) {
 	_, _, code := run(t, runOpts{
 		dir: dir,
 		env: key.signingEnv(t),
-	}, "release", "sign", "--release-artifacts-dir", "release-artifacts")
+	}, "release", "sign", "--file", filepath.Join("release-artifacts", "app.tgz"))
 	if code != 0 {
 		t.Fatalf("sign exit %d", code)
 	}
 
-	sig := filepath.Join(dir, "app.tgz.asc")
+	sig := filepath.Join(ra, "app.tgz.asc")
 	if !fileExists(sig) {
 		t.Fatalf("expected detached signature at %s", sig)
 	}

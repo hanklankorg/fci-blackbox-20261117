@@ -88,9 +88,9 @@ suites sharing a cache root run sequentially. On Linux, a run with another
 absolute `TMPDIR` has its own cache root and lock, so it can run beside the
 first one, starting from cold caches.
 
-The lock regression runs in the Go suite. Its shell-only cleanup counterpart is
-`bash scripts/test-clean-cache.sh`; it uses disposable directories and starts
-no engine, container, or network operation.
+The lock and the cleanup rules are checked in the Go suite
+(`cleanup_test.go`), against disposable directories and a stand-in Buildah;
+they start no container or network operation.
 
 ## Stopping a run
 

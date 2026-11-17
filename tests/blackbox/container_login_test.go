@@ -71,8 +71,8 @@ func TestContainerLogin_NoFallbackForForeignRegistry(t *testing.T) {
 		"GITHUB_ACTOR":       "ci-bot",
 		"REGISTRY_AUTH_FILE": authFile,
 	}}, "container", "login", "--registry", "docker.io", "--registry-username", "registry-user")
-	if code == 0 {
-		t.Fatalf("login to a foreign registry with no password should fail (no token leak); got exit 0")
+	if code != exitNoPerm {
+		t.Fatalf("login to a foreign registry with no password: exit = %d, want %d (missing credential, no token leak)", code, exitNoPerm)
 	}
 
 	// The refusal must name the missing credential rather than failing for an

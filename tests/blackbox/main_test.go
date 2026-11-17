@@ -44,6 +44,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -88,6 +89,10 @@ func TestBinaryIdentity_HelpNamesForgeCI(t *testing.T) {
 // whole package. The real work is in runSuite so its deferred
 // temp-dir cleanup runs before os.Exit (which would skip it).
 func TestMain(m *testing.M) {
+	if code, ok := runFakeTool(); ok {
+		os.Exit(code)
+	}
+
 	code := runSuite(m)
 
 	// After the run, not during: the shortfall is a property of the whole
@@ -161,59 +166,133 @@ func runSuite(m *testing.M) (code int) {
 		return 2
 	}
 
-	// An explicit FORGE_CI_TEST_BINARY override ALWAYS wins over the selected
-	// checkout: compatibility gates point it at the exact candidate binary,
-	// and testing a fresh self-build instead would
-	// silently validate the wrong artifact.
-	if env := os.Getenv("FORGE_CI_TEST_BINARY"); env != "" {
-		binPath = env
-
-		return m.Run()
-	}
-
-	repo := os.Getenv("FORGE_CI_TEST_SOURCE")
-	if !filepath.IsAbs(repo) {
-		fmt.Fprintln(os.Stderr, "blackbox: set FORGE_CI_TEST_BINARY to an engine executable or FORGE_CI_TEST_SOURCE to an absolute engine checkout path")
-
-		return 2
-	}
-	if info, err := os.Stat(filepath.Join(repo, "cmd", "forge-ci")); err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "blackbox: FORGE_CI_TEST_SOURCE %q must contain the cmd/forge-ci directory\n", repo)
-
-		return 2
-	}
-
 	tmp, err := os.MkdirTemp("", "forge-ci-int-*")
 	if err != nil {
-		panic("blackbox: mktemp: " + err.Error())
-	}
+		fmt.Fprintf(os.Stderr, "blackbox: %v\n", err)
 
+		return 2
+	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 
-	binPath = filepath.Join(tmp, "forge-ci")
+	binPath, err = selectEngine(os.Getenv, func(source string) (string, error) {
+		return buildEngine(source, filepath.Join(tmp, "forge-ci"))
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "blackbox: %v\n", err)
+
+		return 2
+	}
+
+	return m.Run()
+}
+
+// selectEngine returns the engine under test. An explicit FORGE_CI_TEST_BINARY
+// ALWAYS wins over the selected checkout: compatibility gates point it at the
+// exact candidate binary, and testing a fresh self-build instead would
+// silently validate the wrong artifact. Otherwise build compiles the checkout
+// FORGE_CI_TEST_SOURCE names; a failed build never falls back to another engine.
+func selectEngine(getenv func(string) string, build func(source string) (string, error)) (string, error) {
+	// Tests run the engine from fixture directories, so a relative path
+	// would name a different file in each.
+	if binary := getenv("FORGE_CI_TEST_BINARY"); binary != "" {
+		if !filepath.IsAbs(binary) {
+			return "", fmt.Errorf("FORGE_CI_TEST_BINARY %q must be an absolute path: %w", binary, os.ErrInvalid)
+		}
+
+		return binary, nil
+	}
+
+	source := getenv("FORGE_CI_TEST_SOURCE")
+	if !filepath.IsAbs(source) {
+		return "", fmt.Errorf("set FORGE_CI_TEST_BINARY to an engine executable or FORGE_CI_TEST_SOURCE to an absolute engine checkout path: %w", os.ErrInvalid)
+	}
+	if info, err := os.Stat(filepath.Join(source, "cmd", "forge-ci")); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("FORGE_CI_TEST_SOURCE %q must contain the cmd/forge-ci directory: %w", source, os.ErrInvalid)
+	}
+
+	return build(source)
+}
+
+// buildEngine compiles the forge-ci checkout at source into out.
+func buildEngine(source, out string) (string, error) {
 	goBin := lookupTool("go")
 	if goBin == "" {
-		panic("blackbox: go is not on PATH")
+		return "", fmt.Errorf("build forge-ci: go: %w", exec.ErrNotFound)
 	}
 
 	ctx, cancel := context.WithTimeout(suiteCtx, 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, goBin, "build", "-o", binPath, "./cmd/forge-ci") //nolint:gosec // resolved compiler and hardcoded args.
-	cmd.Dir = repo
+	cmd := exec.CommandContext(ctx, goBin, "build", "-o", out, "./cmd/forge-ci") //nolint:gosec // resolved compiler and hardcoded args.
+	cmd.Dir = source
 	cmd.Env = isolatedEnv(nil)
 	cmd.Stderr = os.Stderr
 	cmd.WaitDelay = 5 * time.Second
 
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			panic("blackbox: build forge-ci exceeded 5m")
+			return "", fmt.Errorf("build forge-ci exceeded 5m: %w", ctx.Err())
 		}
 
-		panic("blackbox: build forge-ci: " + err.Error())
+		return "", fmt.Errorf("build forge-ci: %w", err)
 	}
 
-	return m.Run()
+	return out, nil
+}
+
+// TestSelectEngine_PrefersBinaryAndBuildsOnlyAValidSource covers the
+// selection rules without a compiler: the build is a recording stand-in.
+func TestSelectEngine_PrefersBinaryAndBuildsOnlyAValidSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	checkout := filepath.Join(root, "renamed source")
+	notDir := filepath.Join(root, "invalid")
+	for _, dir := range []string{filepath.Join(checkout, "cmd", "forge-ci"), filepath.Join(notDir, "cmd")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(notDir, "cmd", "forge-ci"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, binary, source string
+		buildErr             error
+		want, wantErr        string
+		wantBuilds           []string
+	}{
+		{name: "no selection", wantErr: "FORGE_CI_TEST_SOURCE"},
+		{name: "relative source", source: "relative", wantErr: "FORGE_CI_TEST_SOURCE"},
+		{name: "missing source", source: filepath.Join(root, "missing"), wantErr: "FORGE_CI_TEST_SOURCE"},
+		{name: "command is not a directory", source: notDir, wantErr: "FORGE_CI_TEST_SOURCE"},
+		{name: "relative binary", binary: "forge-ci", wantErr: "FORGE_CI_TEST_BINARY"},
+		{name: "binary wins over an invalid source", binary: "/opt/prebuilt engine", source: "relative", want: "/opt/prebuilt engine"},
+		{name: "source built once at its path", source: checkout, want: "built", wantBuilds: []string{checkout}},
+		{name: "failed build has no fallback", source: checkout, buildErr: exec.ErrNotFound, wantErr: exec.ErrNotFound.Error(), wantBuilds: []string{checkout}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := map[string]string{"FORGE_CI_TEST_BINARY": tc.binary, "FORGE_CI_TEST_SOURCE": tc.source}
+			var builds []string
+			got, err := selectEngine(func(name string) string { return env[name] }, func(source string) (string, error) {
+				builds = append(builds, source)
+				if tc.buildErr != nil {
+					return "", tc.buildErr
+				}
+
+				return "built", nil
+			})
+			if got != tc.want || (err == nil) != (tc.wantErr == "") || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("selectEngine = %q, %v; want %q, error containing %q", got, err, tc.want, tc.wantErr)
+			}
+			if !slices.Equal(builds, tc.wantBuilds) {
+				t.Fatalf("builds = %q, want %q", builds, tc.wantBuilds)
+			}
+		})
+	}
 }
 
 // The portable directory lock is also acquired by scripts/clean-cache.sh.
@@ -250,55 +329,6 @@ func TestSuiteCacheLockSerializesOwners(t *testing.T) {
 	}
 	if err := release(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// The cleanup script must derive the same cache root as the suite, so the
-// root comes from cacheRoot under the environment handed to the script.
-func TestSuiteCacheLockBlocksCleanup(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("HOME", base)
-	t.Setenv("TMPDIR", base)
-	root, rootErr := cacheRoot()
-	if rootErr != nil {
-		t.Fatal(rootErr)
-	}
-	cache := filepath.Join(root, "forge-ci-blackbox-home")
-	if err := os.MkdirAll(cache, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	canary := filepath.Join(cache, "keep")
-	if err := os.WriteFile(canary, []byte("active suite"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	release, err := acquireSuiteCacheLock(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runCleanup := func() error {
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "bash", filepath.Join(suiteDir, "scripts", "clean-cache.sh"))
-		cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + base, "TMPDIR=" + base}
-		cmd.WaitDelay = time.Second
-
-		return cmd.Run()
-	}
-	var exit *exec.ExitError
-	if err := runCleanup(); !errors.As(err, &exit) || exit.ExitCode() != 2 {
-		t.Fatalf("cleanup admitted under Go lock: %v", err)
-	}
-	if body, err := os.ReadFile(canary); err != nil || string(body) != "active suite" {
-		t.Fatalf("active cache changed: %q, %v", body, err)
-	}
-	if err := release(); err != nil {
-		t.Fatal(err)
-	}
-	if err := runCleanup(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(cache); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("idle cache not removed: %v", err)
 	}
 }
 
@@ -421,11 +451,15 @@ func rejectStrictTestSelection(args []string) error {
 		"skip":  {},
 	}
 
-	for _, arg := range args {
-		name, _, _ := strings.Cut(arg, "=")
+	for i, arg := range args {
+		name, value, hasValue := strings.Cut(arg, "=")
 		name = strings.TrimLeft(name, "-")
 		name = strings.TrimPrefix(name, "test.")
-		if _, selected := selectionFlags[name]; selected {
+		if !hasValue && i+1 < len(args) {
+			value = args[i+1]
+		}
+		// -count=0 runs no test at all, which passes like an empty selection.
+		if _, selected := selectionFlags[name]; selected || name == "count" && value == "0" {
 			return fmt.Errorf("%w: strict profile forbids test-selection flag %q; run the complete package", errStrictProfile, arg)
 		}
 	}
@@ -448,11 +482,17 @@ func TestRejectStrictTestSelection_CatchesAllFlagForms(t *testing.T) {
 		"-bench=.",
 		"-fuzz=FuzzInput",
 		"-short",
+		"-test.count=0",
+		"-count=0",
 	} {
 		err := preflightProfileArgs([]string{arg})
 		if !errors.Is(err, errStrictProfile) || !strings.Contains(err.Error(), "forbids test-selection flag") {
 			t.Errorf("strict preflight of %q = %v, want the selection refusal", arg, err)
 		}
+	}
+
+	if err := preflightProfileArgs([]string{"-test.count", "0"}); !errors.Is(err, errStrictProfile) {
+		t.Errorf("strict preflight of a separate count 0 = %v, want the selection refusal", err)
 	}
 
 	if err := rejectStrictTestSelection([]string{"-test.v", "-test.count=1", "-test.timeout=60m"}); err != nil {

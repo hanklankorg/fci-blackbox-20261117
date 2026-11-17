@@ -31,18 +31,10 @@ func TestValidateArtifactSignature_KeylessIdentityDerivedFromForge(t *testing.T)
 		t.Fatal(err)
 	}
 
-	// The recording stand-in: logs every invocation's argv, then rejects
-	// like a real cosign facing an unverifiable bundle. Version probes
-	// succeed so tool detection cannot mistake it for an absent cosign.
-	fakeBin := t.TempDir()
-	argvLog := filepath.Join(t.TempDir(), "cosign-argv.log")
-	writeFakeTool(t, fakeBin, "cosign", `printf 'cosign %s\n' "$*" >>`+shellQuote(argvLog)+`
-case "${1:-}" in
-  version) echo 'fake cosign v0'; exit 0 ;;
-esac
-echo 'fake cosign: bundle rejected' >&2
-exit 1
-`)
+	// The cosign stand-in (fakeCosign) records every invocation's argv,
+	// then rejects like a real cosign facing an unverifiable bundle. Version
+	// probes succeed so tool detection cannot mistake it for an absent cosign.
+	fakeBin := installFakeTools(t, "cosign")
 
 	_, stderr, code := run(t, runOpts{dir: dir, env: map[string]string{
 		"PATH":              fakeBin + string(os.PathListSeparator) + suitePATH(),
@@ -74,7 +66,7 @@ exit 1
 	// flag appears somewhere and the repository appears somewhere would be
 	// satisfied by two unrelated lines — the claim is that this verify call
 	// carries a repo-anchored identity.
-	argv := readFile(t, argvLog)
+	argv := fakeCalls(t, fakeBin)
 
 	var identityLine string
 

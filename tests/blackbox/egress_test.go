@@ -70,21 +70,30 @@ func egressBaseAllowedHosts() []string {
 		"nodejs.org",
 		// Maven Central.
 		"repo.maven.apache.org", "repo1.maven.org",
-		// Gradle distributions + plugin portal, Android SDK/AGP artifacts.
-		// services.gradle.org redirects a distribution download to its GitHub
-		// release asset, hence the two GitHub download hosts.
+		// Gradle plugin portal and distribution redirects, Android SDK/AGP
+		// artifacts. The distribution itself is on GitHub: gradleDistributionHosts.
 		".gradle.org", "dl.google.com", "maven.google.com",
-		"github.com", "release-assets.githubusercontent.com",
-		// Docker Hub auth, registry, and the blob CDNs a cold pull is
-		// redirected to. Both are listed: Docker serves blobs from
-		// CloudFront today and from Cloudflare historically, and which one
-		// a pull is sent to is Docker's choice, not the caller's.
-		"auth.docker.io", "registry-1.docker.io",
-		"production.cloudflare.docker.com", "production.cloudfront.docker.com",
 		// AGP's sources/javadoc publication links these platform API references.
 		"developer.android.com", "docs.oracle.com", "kotlinlang.org",
 		// Syft's Java archive catalog data.
 		"toolbox-data.anchore.io",
+	}
+}
+
+// gradleDistributionHosts serve the Gradle distribution a wrapper downloads
+// on a cold cache: services.gradle.org redirects it to a GitHub release asset.
+// A test that runs a Gradle wrapper allows them for itself.
+func gradleDistributionHosts() []string {
+	return []string{"github.com", "release-assets.githubusercontent.com"}
+}
+
+// dockerHubHosts are Docker Hub's auth, registry and the blob CDNs a cold pull
+// is redirected to, for a test that builds from a Docker Hub base. Both CDNs
+// are listed: which one a pull is sent to is Docker's choice, not the caller's.
+func dockerHubHosts() []string {
+	return []string{
+		"auth.docker.io", "registry-1.docker.io",
+		"production.cloudflare.docker.com", "production.cloudfront.docker.com",
 	}
 }
 

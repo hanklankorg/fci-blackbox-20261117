@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: CC0-1.0
 # Removes the suite's private caches (home and Buildah store) under the cache
 # root, taking the suite's lock and refusing linked or shared directories.
-# Called by `just clean`, test-clean-cache.sh and the black-box suite
-# (tests/blackbox/main_test.go); takes no arguments.
+# Called by `just clean` and the black-box suite (tests/blackbox/cleanup_test.go);
+# takes no arguments.
 set -euo pipefail
 
 admit_directory() {

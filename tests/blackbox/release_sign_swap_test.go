@@ -77,7 +77,7 @@ func TestSwapRefusal_ReleaseSignRefusesWith78(t *testing.T) {
 	_, stderr, code := run(t, runOpts{
 		dir: dir,
 		env: swapEnv(t, key, true),
-	}, "release", "sign", "--release-artifacts-dir", "release-artifacts")
+	}, "release", "sign", "--file", filepath.Join("release-artifacts", "app.tgz"))
 
 	if code != exitConfig { // EX_CONFIG (sysexits.h)
 		t.Errorf("expected EX_CONFIG=78 with swap on, got %d\nstderr: %s", code, stderr)
@@ -94,7 +94,7 @@ func TestSwapRefusal_ReleaseSignRefusesWith78(t *testing.T) {
 	}
 
 	// The signature must NOT have been produced.
-	if fileExists(filepath.Join(dir, "app.tgz.asc")) {
+	if fileExists(filepath.Join(ra, "app.tgz.asc")) {
 		t.Errorf("policy was bypassed — signature was created despite swap refusal")
 	}
 }
@@ -123,13 +123,13 @@ func TestSwapRefusal_ReleaseSignPassesWhenSwapOff(t *testing.T) {
 	_, stderr, code := run(t, runOpts{
 		dir: dir,
 		env: swapEnv(t, key, false),
-	}, "release", "sign", "--release-artifacts-dir", "release-artifacts")
+	}, "release", "sign", "--file", filepath.Join("release-artifacts", "app.tgz"))
 
 	if code != 0 {
 		t.Fatalf("expected exit 0 with swap off, got %d\nstderr: %s", code, stderr)
 	}
 
-	if !fileExists(filepath.Join(dir, "app.tgz.asc")) {
+	if !fileExists(filepath.Join(ra, "app.tgz.asc")) {
 		t.Errorf("signature should have been created on swap-off host")
 	}
 }
@@ -165,7 +165,7 @@ func TestSwapRefusal_DebugFlagOnASwapFreeHostDoesNotWarn(t *testing.T) {
 	env["CI"] = "true"
 
 	_, stderr, code := run(t, runOpts{dir: dir, env: env},
-		"release", "sign", "--debug-allow-swap", "--release-artifacts-dir", "release-artifacts")
+		"release", "sign", "--debug-allow-swap", "--file", filepath.Join("release-artifacts", "app.tgz"))
 	if code != 0 {
 		t.Fatalf("exit %d\nstderr: %s", code, stderr)
 	}
@@ -174,7 +174,7 @@ func TestSwapRefusal_DebugFlagOnASwapFreeHostDoesNotWarn(t *testing.T) {
 		t.Errorf("--debug-allow-swap warned on a swap-free host, where it waived nothing:\n%s", stderr)
 	}
 
-	if !fileExists(filepath.Join(dir, "app.tgz.asc")) {
+	if !fileExists(filepath.Join(ra, "app.tgz.asc")) {
 		t.Error("signature should still have been produced")
 	}
 }
@@ -209,13 +209,13 @@ func TestSwapRefusal_DebugFlagAllowsSigning(t *testing.T) {
 	env["CI"] = "true"
 
 	_, stderr, code := run(t, runOpts{dir: dir, env: env},
-		"release", "sign", "--debug-allow-swap", "--release-artifacts-dir", "release-artifacts")
+		"release", "sign", "--debug-allow-swap", "--file", filepath.Join("release-artifacts", "app.tgz"))
 
 	if code != 0 {
 		t.Fatalf("expected exit 0 with --debug-allow-swap set, got %d\nstderr: %s", code, stderr)
 	}
 
-	if !fileExists(filepath.Join(dir, "app.tgz.asc")) {
+	if !fileExists(filepath.Join(ra, "app.tgz.asc")) {
 		t.Errorf("expected signature when debug override active; not produced")
 	}
 
@@ -286,12 +286,12 @@ func TestSwapRefusal_UnreadableSwapStateSoftPasses(t *testing.T) {
 			env["FORGE_CI_PROC_SWAPS"] = tc.swaps(t)
 
 			_, stderr, code := run(t, runOpts{dir: dir, env: env},
-				"release", "sign", "--release-artifacts-dir", "release-artifacts")
+				"release", "sign", "--file", filepath.Join("release-artifacts", "app.tgz"))
 			if code != 0 {
 				t.Fatalf("indeterminate swap state refused signing: exit %d\nstderr: %s", code, stderr)
 			}
 
-			if !fileExists(filepath.Join(dir, "app.tgz.asc")) {
+			if !fileExists(filepath.Join(ra, "app.tgz.asc")) {
 				t.Error("signature should have been produced when swap state is indeterminate")
 			}
 

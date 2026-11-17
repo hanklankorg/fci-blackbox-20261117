@@ -11,9 +11,9 @@
 // Each step's output feeds the next. The value of these tests over
 // the per-step slice tests is catching contract drift between
 // adjacent steps — e.g. the SBOM filename convention must match
-// what `release checksums --sbom-dir` discovers, the artifact dir
-// must align with what `release sign --release-artifacts-dir`
-// expects, and the GPG key plumbing must thread through both.
+// what `release checksums --sbom-dir` discovers, the files
+// `release sign --file` signs must be the ones the manifest lists,
+// and the GPG key plumbing must thread through both.
 
 package blackbox
 
@@ -86,14 +86,14 @@ func TestFlow_ArtifactFirst_MavenApp(t *testing.T) {
 	assertChecksumManifestLists(t, manifest, "maven-hello-1.0.0.jar",
 		"maven-hello-1.0.0-analyzed-jar-sbom.spdx.json", "maven-hello-1.0.0-analyzed-jar-sbom.cyclonedx.json")
 
-	// 4. release sign — same --attach-artifacts shape. .asc files
-	//    land in cwd per the sign subcommand's contract.
+	// 4. release sign the same file and the manifest; each .asc lands
+	//    beside its file.
 	if _, stderr, code := run(t, runOpts{
 		dir: proj,
 		env: key.signingEnv(t),
 	},
 		"release", "sign",
-		"--attach-artifacts", "target/maven-hello-1.0.0.jar"); code != 0 {
+		"--file", "target/maven-hello-1.0.0.jar"); code != 0 {
 		t.Fatalf("step 4 sign exit %d\nstderr: %s", code, stderr)
 	}
 
@@ -105,23 +105,24 @@ func TestFlow_ArtifactFirst_MavenApp(t *testing.T) {
 	}
 
 	// 6. verify GPG detached signatures on the jar AND the manifest.
-	for _, pair := range []struct{ asc, subj string }{
-		{asc: "checksums.sha256.asc", subj: "checksums.sha256"},
-		{asc: "maven-hello-1.0.0.jar.asc", subj: "target/maven-hello-1.0.0.jar"},
+	for _, subj := range []string{
+		"checksums.sha256",
+		"target/maven-hello-1.0.0.jar",
 	} {
-		ascPath := filepath.Join(proj, pair.asc)
+		asc := subj + ".asc"
+		ascPath := filepath.Join(proj, asc)
 
 		if !fileExists(ascPath) {
-			t.Errorf("step 6 missing signature %s", pair.asc)
+			t.Errorf("step 6 missing signature %s", asc)
 
 			continue
 		}
 
 		verify := toolCommand(t, proj, map[string]string{"GNUPGHOME": key.gnupgHome},
-			"gpg", "--verify", ascPath, filepath.Join(proj, pair.subj))
+			"gpg", "--verify", ascPath, filepath.Join(proj, subj))
 
 		if out, err := verify.CombinedOutput(); err != nil {
-			t.Errorf("step 6 gpg --verify %s: %v\n%s", pair.asc, err, out)
+			t.Errorf("step 6 gpg --verify %s: %v\n%s", asc, err, out)
 		}
 	}
 }
@@ -183,31 +184,34 @@ func TestFlow_ArtifactFirst_MavenLib(t *testing.T) {
 		env: key.signingEnv(t),
 	},
 		"release", "sign",
-		"--attach-artifacts", attach); code != 0 {
+		"--file", "target/maven-lib-1.0.0.jar",
+		"--file", "target/maven-lib-1.0.0-sources.jar",
+		"--file", "target/maven-lib-1.0.0-javadoc.jar"); code != 0 {
 		t.Fatalf("sign exit %d\nstderr: %s", code, stderr)
 	}
 
-	// .asc files land in cwd (the sign subcommand's contract). Each one is
-	// verified with gpg, as the other cascades do: a sidecar that exists but
+	// Each .asc lands beside its file and is verified with gpg, as the other
+	// cascades do: a sidecar that exists but
 	// does not verify is exactly what a mis-targeted sign step leaves behind.
-	for _, pair := range []struct{ asc, subj string }{
-		{asc: "checksums.sha256.asc", subj: "checksums.sha256"},
-		{asc: "maven-lib-1.0.0.jar.asc", subj: "target/maven-lib-1.0.0.jar"},
-		{asc: "maven-lib-1.0.0-sources.jar.asc", subj: "target/maven-lib-1.0.0-sources.jar"},
-		{asc: "maven-lib-1.0.0-javadoc.jar.asc", subj: "target/maven-lib-1.0.0-javadoc.jar"},
+	for _, subj := range []string{
+		"checksums.sha256",
+		"target/maven-lib-1.0.0.jar",
+		"target/maven-lib-1.0.0-sources.jar",
+		"target/maven-lib-1.0.0-javadoc.jar",
 	} {
-		ascPath := filepath.Join(proj, pair.asc)
+		asc := subj + ".asc"
+		ascPath := filepath.Join(proj, asc)
 		if !fileExists(ascPath) {
-			t.Errorf("missing signature %s", pair.asc)
+			t.Errorf("missing signature %s", asc)
 
 			continue
 		}
 
 		verify := toolCommand(t, proj, map[string]string{"GNUPGHOME": key.gnupgHome},
-			"gpg", "--verify", ascPath, filepath.Join(proj, pair.subj))
+			"gpg", "--verify", ascPath, filepath.Join(proj, subj))
 
 		if out, err := verify.CombinedOutput(); err != nil {
-			t.Errorf("gpg --verify %s: %v\n%s", pair.asc, err, out)
+			t.Errorf("gpg --verify %s: %v\n%s", asc, err, out)
 		}
 	}
 }
@@ -226,7 +230,7 @@ func TestFlow_ArtifactFirst_Gradle(t *testing.T) {
 
 	key := bootstrapGPGKey(t)
 
-	proj := copyTree(t, fixture("gradle-hello"))
+	proj := copyGradleFixture(t, "gradle-hello")
 
 	if !fileExists(filepath.Join(proj, "gradlew")) {
 		skipInOptionalProfilef(t, "gradlew not present in fixture (gradle wrapper bootstrap needs JDK + network)")
@@ -282,7 +286,7 @@ func TestFlow_ArtifactFirst_Gradle(t *testing.T) {
 		env: key.signingEnv(t),
 	},
 		"release", "sign",
-		"--attach-artifacts", relJar); code != 0 {
+		"--file", relJar); code != 0 {
 		t.Fatalf("step 4 sign exit %d\nstderr: %s", code, stderr)
 	}
 
@@ -294,22 +298,23 @@ func TestFlow_ArtifactFirst_Gradle(t *testing.T) {
 	}
 
 	// 6. gpg --verify on the jar + manifest signatures.
-	for _, pair := range []struct{ asc, subj string }{
-		{asc: "checksums.sha256.asc", subj: "checksums.sha256"},
-		{asc: filepath.Base(mainJar) + ".asc", subj: relJar},
+	for _, subj := range []string{
+		"checksums.sha256",
+		relJar,
 	} {
-		ascPath := filepath.Join(proj, pair.asc)
+		asc := subj + ".asc"
+		ascPath := filepath.Join(proj, asc)
 		if !fileExists(ascPath) {
-			t.Errorf("step 6 missing signature %s", pair.asc)
+			t.Errorf("step 6 missing signature %s", asc)
 
 			continue
 		}
 
 		verify := toolCommand(t, proj, map[string]string{"GNUPGHOME": key.gnupgHome},
-			"gpg", "--verify", ascPath, filepath.Join(proj, pair.subj))
+			"gpg", "--verify", ascPath, filepath.Join(proj, subj))
 
 		if out, err := verify.CombinedOutput(); err != nil {
-			t.Errorf("step 6 gpg --verify %s: %v\n%s", pair.asc, err, out)
+			t.Errorf("step 6 gpg --verify %s: %v\n%s", asc, err, out)
 		}
 	}
 }
@@ -373,7 +378,7 @@ func TestFlow_ArtifactFirst_GoBinary(t *testing.T) {
 		env: key.signingEnv(t),
 	},
 		"release", "sign",
-		"--attach-artifacts", "dist/linux-amd64/go-hello-linux-amd64"); code != 0 {
+		"--file", "dist/linux-amd64/go-hello-linux-amd64"); code != 0 {
 		t.Fatalf("step 4 sign exit %d\nstderr: %s", code, stderr)
 	}
 
@@ -385,22 +390,23 @@ func TestFlow_ArtifactFirst_GoBinary(t *testing.T) {
 	}
 
 	// 6. gpg --verify on the binary's signature + the manifest signature.
-	for _, pair := range []struct{ asc, subj string }{
-		{asc: "checksums.sha256.asc", subj: "checksums.sha256"},
-		{asc: "go-hello-linux-amd64.asc", subj: "dist/linux-amd64/go-hello-linux-amd64"},
+	for _, subj := range []string{
+		"checksums.sha256",
+		"dist/linux-amd64/go-hello-linux-amd64",
 	} {
-		ascPath := filepath.Join(proj, pair.asc)
+		asc := subj + ".asc"
+		ascPath := filepath.Join(proj, asc)
 		if !fileExists(ascPath) {
-			t.Errorf("step 6 missing signature %s", pair.asc)
+			t.Errorf("step 6 missing signature %s", asc)
 
 			continue
 		}
 
 		verify := toolCommand(t, proj, map[string]string{"GNUPGHOME": key.gnupgHome},
-			"gpg", "--verify", ascPath, filepath.Join(proj, pair.subj))
+			"gpg", "--verify", ascPath, filepath.Join(proj, subj))
 
 		if out, err := verify.CombinedOutput(); err != nil {
-			t.Errorf("step 6 gpg --verify %s: %v\n%s", pair.asc, err, out)
+			t.Errorf("step 6 gpg --verify %s: %v\n%s", asc, err, out)
 		}
 	}
 }
@@ -464,7 +470,7 @@ func TestFlow_ArtifactFirst_CargoBinary(t *testing.T) {
 		env: key.signingEnv(t),
 	},
 		"release", "sign",
-		"--attach-artifacts", binaryRelative); code != 0 {
+		"--file", binaryRelative); code != 0 {
 		t.Fatalf("step 4 sign exit %d\nstderr: %s", code, stderr)
 	}
 
@@ -476,22 +482,23 @@ func TestFlow_ArtifactFirst_CargoBinary(t *testing.T) {
 	}
 
 	// 6. gpg --verify on the binary's signature + the manifest signature.
-	for _, pair := range []struct{ asc, subj string }{
-		{asc: "checksums.sha256.asc", subj: "checksums.sha256"},
-		{asc: binaryName + ".asc", subj: binaryRelative},
+	for _, subj := range []string{
+		"checksums.sha256",
+		binaryRelative,
 	} {
-		ascPath := filepath.Join(proj, pair.asc)
+		asc := subj + ".asc"
+		ascPath := filepath.Join(proj, asc)
 		if !fileExists(ascPath) {
-			t.Errorf("step 6 missing signature %s", pair.asc)
+			t.Errorf("step 6 missing signature %s", asc)
 
 			continue
 		}
 
 		verify := toolCommand(t, proj, map[string]string{"GNUPGHOME": key.gnupgHome},
-			"gpg", "--verify", ascPath, filepath.Join(proj, pair.subj))
+			"gpg", "--verify", ascPath, filepath.Join(proj, subj))
 
 		if out, err := verify.CombinedOutput(); err != nil {
-			t.Errorf("step 6 gpg --verify %s: %v\n%s", pair.asc, err, out)
+			t.Errorf("step 6 gpg --verify %s: %v\n%s", asc, err, out)
 		}
 	}
 }
@@ -552,7 +559,7 @@ func TestFlow_ArtifactFirst_NPM(t *testing.T) {
 	if _, stderr, code := run(t, runOpts{
 		dir: proj,
 		env: key.signingEnv(t),
-	}, "release", "sign", "--attach-artifacts", "*.tgz"); code != 0 {
+	}, "release", "sign", "--file", filepath.Base(tgz[0])); code != 0 {
 		t.Fatalf("sign exit %d\nstderr: %s", code, stderr)
 	}
 
@@ -565,23 +572,24 @@ func TestFlow_ArtifactFirst_NPM(t *testing.T) {
 
 	tarball := filepath.Base(tgz[0])
 
-	for _, pair := range []struct{ asc, subj string }{
-		{asc: "checksums.sha256.asc", subj: "checksums.sha256"},
-		{asc: tarball + ".asc", subj: tarball},
+	for _, subj := range []string{
+		"checksums.sha256",
+		tarball,
 	} {
-		ascPath := filepath.Join(proj, pair.asc)
+		asc := subj + ".asc"
+		ascPath := filepath.Join(proj, asc)
 
 		if !fileExists(ascPath) {
-			t.Errorf("missing signature %s", pair.asc)
+			t.Errorf("missing signature %s", asc)
 
 			continue
 		}
 
 		verify := toolCommand(t, proj, map[string]string{"GNUPGHOME": key.gnupgHome},
-			"gpg", "--verify", ascPath, filepath.Join(proj, pair.subj))
+			"gpg", "--verify", ascPath, filepath.Join(proj, subj))
 
 		if out, err := verify.CombinedOutput(); err != nil {
-			t.Errorf("gpg --verify %s: %v\n%s", pair.asc, err, out)
+			t.Errorf("gpg --verify %s: %v\n%s", asc, err, out)
 		}
 	}
 }

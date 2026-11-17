@@ -176,7 +176,8 @@ func TestFixtures_GradleWrapperJarMatchesCommittedChecksum(t *testing.T) {
 //     implicit or explicit `latest`;
 //   - a Go or Rust builder image and every rust-toolchain.toml use the version
 //     .mise.toml pins, so the fixtures build with the toolchain the suite runs;
-//   - every Gradle wrapper names an exact distribution version.
+//   - every Gradle wrapper names an exact distribution version and the
+//     distribution's SHA-256, so the wrapper verifies what it downloads.
 //
 // TestFixtures_GradleWrapperJarMatchesCommittedChecksum covers the wrapper jar.
 func TestFixtures_ToolchainsArePinned(t *testing.T) {
@@ -217,8 +218,12 @@ func TestFixtures_ToolchainsArePinned(t *testing.T) {
 		case "gradle-wrapper.properties":
 			found++
 
-			if !gradleDistributionRE.MatchString(readFile(t, path)) {
+			properties := readFile(t, path)
+			if !gradleDistributionRE.MatchString(properties) {
 				t.Errorf("%s: distributionUrl does not name an exact gradle-X.Y[.Z] distribution", rel)
+			}
+			if !gradleDistributionSumRE.MatchString(properties) {
+				t.Errorf("%s: distributionSha256Sum is not a SHA-256", rel)
 			}
 		}
 
@@ -296,3 +301,6 @@ func miseVersion(t *testing.T, mise, pattern string) string {
 
 //nolint:gochecknoglobals // read-only compiled pattern.
 var gradleDistributionRE = regexp.MustCompile(`(?m)^distributionUrl=\S*/gradle-\d+\.\d+(\.\d+)?-bin\.zip$`)
+
+//nolint:gochecknoglobals // read-only compiled pattern.
+var gradleDistributionSumRE = regexp.MustCompile(`(?m)^distributionSha256Sum=[0-9a-f]{64}$`)

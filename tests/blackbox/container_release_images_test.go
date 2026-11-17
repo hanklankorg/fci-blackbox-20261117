@@ -328,8 +328,8 @@ func TestReleaseImagesRollback_RequiresAProviderToken(t *testing.T) {
 	}
 
 	_, stderr, code := runReleaseImages(t, fix, "v1.2.3", fix.image, "rollback")
-	if code != exitUsage {
-		t.Fatalf("rollback without a provider token: exit=%d, want 2 (usage); stderr=%s", code, stderr)
+	if code != exitNoPerm {
+		t.Fatalf("rollback without a provider token: exit=%d, want %d (missing credential); stderr=%s", code, exitNoPerm, stderr)
 	}
 
 	assertContains(t, "names the token flag", stderr, "--provider-token-file")

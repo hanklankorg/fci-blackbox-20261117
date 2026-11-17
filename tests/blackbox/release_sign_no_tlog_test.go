@@ -74,13 +74,13 @@ func TestReleaseSign_PublishesNoTlogEntry(t *testing.T) {
 		dir: dir,
 		env: map[string]string{"COSIGN_PASSWORD": ""},
 	}, "release", "sign",
-		"--release-artifacts-dir", "release-artifacts",
+		"--file", filepath.Join("release-artifacts", "app.tgz"),
 		"--method", "kms", "--key", priv)
 	if code != 0 {
 		t.Fatalf("release sign exit=%d stderr=%s", code, stderr)
 	}
 
-	bundle := filepath.Join(dir, "app.tgz.bundle")
+	bundle := filepath.Join(ra, "app.tgz.bundle")
 	if !fileExists(bundle) {
 		t.Fatalf("expected a cosign bundle at %s", bundle)
 	}

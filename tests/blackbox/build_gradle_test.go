@@ -24,7 +24,7 @@ import (
 func TestGradleSBOM_VersionLines(t *testing.T) {
 	requireTool(t, "java")
 
-	proj := copyTree(t, fixture("gradle-hello"))
+	proj := copyGradleFixture(t, "gradle-hello")
 
 	if !fileExists(filepath.Join(proj, "gradlew")) {
 		skipInOptionalProfilef(t, "gradlew not present in fixture (need a JDK + network to bootstrap)")
@@ -100,22 +100,23 @@ func inspectJavaHome(ctx context.Context, java string, env []string) (string, er
 		return "", fmt.Errorf("query java.home: %w: %s", err, output)
 	}
 
-	for line := range strings.SplitSeq(string(output), "\n") {
+	home, err := parseJavaHome(string(output))
+	if err != nil {
+		return "", err
+	}
+
+	return home, checkJDK(home)
+}
+
+// parseJavaHome returns the java.home that -XshowSettings:properties reports.
+func parseJavaHome(output string) (string, error) {
+	for line := range strings.SplitSeq(output, "\n") {
 		home, found := strings.CutPrefix(strings.TrimSpace(line), "java.home = ")
 		if !found {
 			continue
 		}
 		if !filepath.IsAbs(home) {
 			return "", fmt.Errorf("java.home is not absolute: %q: %w", home, os.ErrInvalid)
-		}
-		for _, name := range []string{"java", "javac"} {
-			info, statErr := os.Stat(filepath.Join(home, "bin", name))
-			if statErr != nil {
-				return "", fmt.Errorf("JDK %s: %w", name, statErr)
-			}
-			if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-				return "", fmt.Errorf("JDK %s is not executable: %w", name, os.ErrInvalid)
-			}
 		}
 
 		return home, nil
@@ -124,14 +125,30 @@ func inspectJavaHome(ctx context.Context, java string, env []string) (string, er
 	return "", fmt.Errorf("runtime did not report java.home: %w", os.ErrInvalid)
 }
 
+// checkJDK requires the executable java and javac a JDK home carries.
+func checkJDK(home string) error {
+	for _, name := range []string{"java", "javac"} {
+		info, err := os.Stat(filepath.Join(home, "bin", name))
+		if err != nil {
+			return fmt.Errorf("JDK %s: %w", name, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+			return fmt.Errorf("JDK %s is not executable: %w", name, os.ErrInvalid)
+		}
+	}
+
+	return nil
+}
+
+// The java and javac in these homes are only inspected, never run, so they
+// are empty files with the executable bit.
 func TestJavaHome_RuntimeMetadataAndHealth(t *testing.T) {
 	t.Parallel()
 
-	for _, scenario := range []string{"launcher", "relative home", "missing property", "missing compiler", "failed runtime"} {
+	for _, scenario := range []string{"usable JDK", "relative home", "missing property", "missing compiler", "not executable"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
-			root := t.TempDir()
-			home := filepath.Join(root, "real JDK", "Contents", "Home")
+			home := filepath.Join(t.TempDir(), "real JDK", "Contents", "Home")
 			if err := os.MkdirAll(filepath.Join(home, "bin"), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -139,27 +156,27 @@ func TestJavaHome_RuntimeMetadataAndHealth(t *testing.T) {
 				if name == "javac" && scenario == "missing compiler" {
 					continue
 				}
-				if err := os.WriteFile(filepath.Join(home, "bin", name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				mode := os.FileMode(0o700)
+				if name == "javac" && scenario == "not executable" {
+					mode = 0o600
+				}
+				if err := os.WriteFile(filepath.Join(home, "bin", name), nil, mode); err != nil {
 					t.Fatal(err)
 				}
-			}
-			body := "#!/bin/sh\nprintf '    java.home = %s\\n' \"$REPORTED_HOME\" >&2\n"
-			if scenario == "missing property" {
-				body = "#!/bin/sh\nprintf 'java version fixture\\n' >&2\n"
-			}
-			if scenario == "failed runtime" {
-				body += "exit 7\n"
-			}
-			launcher := filepath.Join(root, "launcher")
-			if err := os.WriteFile(launcher, []byte(body), 0o700); err != nil {
-				t.Fatal(err)
 			}
 			reported := home
 			if scenario == "relative home" {
 				reported = "relative/jdk"
 			}
-			got, err := inspectJavaHome(t.Context(), launcher, []string{"REPORTED_HOME=" + reported})
-			if scenario != "launcher" {
+			output := "Property settings:\n    java.home = " + reported + "\n"
+			if scenario == "missing property" {
+				output = "java version fixture\n"
+			}
+			got, err := parseJavaHome(output)
+			if err == nil {
+				err = checkJDK(got)
+			}
+			if scenario != "usable JDK" {
 				if err == nil {
 					t.Fatalf("unusable JDK was accepted: %q", got)
 				}

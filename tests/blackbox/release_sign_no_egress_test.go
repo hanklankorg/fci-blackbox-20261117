@@ -109,7 +109,7 @@ func TestReleaseSign_MakesNoProxyObservableHTTPAttempt(t *testing.T) {
 	env["COSIGN_PASSWORD"] = ""
 
 	_, stderr, code := run(t, runOpts{dir: dir, env: env}, "release", "sign",
-		"--release-artifacts-dir", "release-artifacts",
+		"--file", filepath.Join("release-artifacts", "app.tgz"),
 		"--method", "kms", "--key", key)
 	if code != 0 {
 		t.Fatalf("release sign exit=%d stderr=%s", code, stderr)
@@ -145,7 +145,7 @@ func TestReleaseSign_EnvKeyMakesNoProxyObservableHTTPAttempt(t *testing.T) {
 	env["COSIGN_KEY"] = readFile(t, key)
 
 	_, stderr, code := run(t, runOpts{dir: dir, env: env}, "release", "sign",
-		"--release-artifacts-dir", "release-artifacts",
+		"--file", filepath.Join("release-artifacts", "app.tgz"),
 		"--method", "kms", "--key", "env://COSIGN_KEY")
 	if code != 0 {
 		t.Fatalf("release sign with an env:// key exit=%d stderr=%s", code, stderr)

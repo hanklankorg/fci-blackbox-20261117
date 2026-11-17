@@ -71,6 +71,8 @@ func assertNativeLinuxArtifact(t *testing.T, path string) {
 //   - the syft analyzed-binary SBOM lands next to it
 //   - checksums + sign work through the real local CLI and tools
 func TestFlow_ContainerFirst_Cargo(t *testing.T) {
+	// The builder base is pulled from Docker Hub on a cold store.
+	allowEgress(t, dockerHubHosts()...)
 	requireWorkingTool(t, "cargo", "--version")
 	requireTool(t, "cargo-cyclonedx")
 	requireTool(t, "buildah")
@@ -171,7 +173,7 @@ func TestFlow_ContainerFirst_Cargo(t *testing.T) {
 		dir: proj,
 		env: key.signingEnv(t),
 	}, "release", "sign",
-		"--attach-artifacts", binaryRelative); code != 0 {
+		"--file", binaryRelative); code != 0 {
 		t.Fatalf("step 5 sign exit %d\nstderr: %s", code, stderr)
 	}
 
@@ -186,23 +188,24 @@ func TestFlow_ContainerFirst_Cargo(t *testing.T) {
 	// exists to produce and what consumers verify; step 5 signs it, so leaving
 	// its .asc unchecked meant a sign step that mis-targeted or truncated the
 	// binary signature passed while the manifest half still looked right.
-	for _, pair := range []struct{ asc, subj string }{
-		{asc: "checksums.sha256.asc", subj: "checksums.sha256"},
-		{asc: binaryName + ".asc", subj: binaryRelative},
+	for _, subj := range []string{
+		"checksums.sha256",
+		binaryRelative,
 	} {
-		ascPath := filepath.Join(proj, pair.asc)
+		asc := subj + ".asc"
+		ascPath := filepath.Join(proj, asc)
 
 		if !fileExists(ascPath) {
-			t.Errorf("step 6 missing signature %s", pair.asc)
+			t.Errorf("step 6 missing signature %s", asc)
 
 			continue
 		}
 
 		verify := toolCommand(t, proj, map[string]string{"GNUPGHOME": key.gnupgHome},
-			"gpg", "--verify", ascPath, filepath.Join(proj, pair.subj))
+			"gpg", "--verify", ascPath, filepath.Join(proj, subj))
 
 		if out, err := verify.CombinedOutput(); err != nil {
-			t.Errorf("step 6 gpg --verify %s: %v\n%s", pair.asc, err, out)
+			t.Errorf("step 6 gpg --verify %s: %v\n%s", asc, err, out)
 		}
 	}
 }

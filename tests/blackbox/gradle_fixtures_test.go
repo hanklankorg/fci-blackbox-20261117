@@ -13,8 +13,11 @@ import (
 
 // Gradle projects share the existing vendored wrapper, but can pin different
 // distributions in their own properties. No third-party wrapper is duplicated.
+// The wrapper may download its distribution, so the test allows those hosts;
+// a test that runs Gradle stays serial anyway.
 func copyGradleFixture(t *testing.T, name string) string {
 	t.Helper()
+	allowEgress(t, gradleDistributionHosts()...)
 	project := copyTree(t, fixture(name))
 	for _, relative := range []string{"gradlew", "gradlew.bat", "gradle/wrapper/gradle-wrapper.jar", "gradle/wrapper/gradle-wrapper.jar.sha256", "gradle/wrapper/gradle-wrapper.properties"} {
 		destination := filepath.Join(project, relative)

@@ -14,8 +14,10 @@
 package blackbox
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -26,7 +28,8 @@ const (
 )
 
 // signingKeyFixture writes the trusted anchor plus a cosign stand-in that
-// derives derivedKey, and returns the working directory and the anchor path.
+// derives derivedKey, and returns the working directory, the anchor path and
+// the stand-in's directory.
 func signingKeyFixture(t *testing.T, trustedKey, derivedKey string) (dir, anchor, fakeBin string) {
 	t.Helper()
 
@@ -37,20 +40,50 @@ func signingKeyFixture(t *testing.T, trustedKey, derivedKey string) (dir, anchor
 		t.Fatal(err)
 	}
 
-	fakeBin = t.TempDir()
-	writeFakeTool(t, fakeBin, "cosign", `case "${1:-}" in
-  version) echo 'fake cosign v0'; exit 0 ;;
-  public-key)
-    [ -n "${COSIGN_KEY:-}" ] || { echo 'fake cosign: no key in env' >&2; exit 1; }
-    printf '%s' `+shellQuote(derivedKey)+`
-    exit 0
-    ;;
-esac
-echo 'fake cosign: unexpected invocation' >&2
-exit 1
-`)
+	fakeBin = installFakeTools(t, "cosign")
+	if err := os.WriteFile(filepath.Join(fakeBin, "public-key"), []byte(derivedKey), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	return dir, anchor, fakeBin
+}
+
+// fakeCosign plays the private key: public-key prints the public-key file of
+// its directory and records the environment it got there. Any command but
+// version and public-key is refused, as a real cosign refuses an unverifiable
+// bundle.
+func fakeCosign(dir string, args []string) int {
+	command := ""
+	if len(args) > 0 {
+		command = args[0]
+	}
+	switch command {
+	case "version":
+		fmt.Println("fake cosign v0")
+
+		return 0
+	case "public-key":
+		if os.Getenv("COSIGN_KEY") == "" {
+			fmt.Fprintln(os.Stderr, "fake cosign: no key in env")
+
+			return 1
+		}
+		key, err := os.ReadFile(filepath.Join(dir, "public-key"))
+		if err == nil {
+			err = recordEnv(dir)
+		}
+		if err == nil {
+			_, err = os.Stdout.Write(key)
+		}
+		if err != nil {
+			return fakeFailed("%v", err)
+		}
+
+		return 0
+	}
+	fmt.Fprintln(os.Stderr, "fake cosign: rejected")
+
+	return 1
 }
 
 func signingKeyEnv(fakeBin string, extra map[string]string) map[string]string {
@@ -167,20 +200,6 @@ func TestValidateSigningKey_RejectsATamperedTrustAnchor(t *testing.T) {
 func TestValidateSigningKey_IsolatesTheCosignSubprocess(t *testing.T) {
 	dir, anchor, fakeBin := signingKeyFixture(t, blackboxTrustedKey, blackboxTrustedKey)
 
-	seen := filepath.Join(t.TempDir(), "child-env.txt")
-	writeFakeTool(t, fakeBin, "cosign", `case "${1:-}" in
-  version) echo 'fake cosign v0'; exit 0 ;;
-  public-key)
-    printf 'AMBIENT=%s\nKEY=%s\nPASSWORD=%s\n' \
-      "${AMBIENT_MUST_NOT_REACH_COSIGN:-absent}" "${COSIGN_KEY:+present}" "${COSIGN_PASSWORD:-absent}" \
-      >`+shellQuote(seen)+`
-    printf '%s' `+shellQuote(blackboxTrustedKey)+`
-    exit 0
-    ;;
-esac
-exit 1
-`)
-
 	_, stderr, code := run(t, runOpts{dir: dir, env: signingKeyEnv(fakeBin, map[string]string{
 		"AMBIENT_MUST_NOT_REACH_COSIGN": "ambient-secret",
 		"COSIGN_PASSWORD":               "key-passphrase",
@@ -189,19 +208,14 @@ exit 1
 		t.Fatalf("exit = %d, want 0\nstderr: %s", code, stderr)
 	}
 
-	body, err := os.ReadFile(seen)
-	if err != nil {
-		t.Fatalf("cosign stand-in recorded nothing: %v", err)
-	}
-
-	childEnv := string(body)
-	if !strings.Contains(childEnv, "AMBIENT=absent") {
-		t.Errorf("an ambient secret reached the cosign subprocess: %s", childEnv)
+	childEnv := fakeEnv(t, fakeBin)
+	if slices.ContainsFunc(childEnv, func(v string) bool { return strings.HasPrefix(v, "AMBIENT_MUST_NOT_REACH_COSIGN=") }) {
+		t.Errorf("an ambient secret reached the cosign subprocess: %q", childEnv)
 	}
 
 	// The isolation must not be so aggressive that signing stops working:
 	// the key and its passphrase are exactly what cosign still needs.
-	if !strings.Contains(childEnv, "KEY=present") || !strings.Contains(childEnv, "PASSWORD=key-passphrase") {
-		t.Errorf("isolation withheld the key material cosign needs: %s", childEnv)
+	if !slices.Contains(childEnv, "COSIGN_KEY=private-key-material-DO-NOT-LOG") || !slices.Contains(childEnv, "COSIGN_PASSWORD=key-passphrase") {
+		t.Errorf("isolation withheld the key material cosign needs: %q", childEnv)
 	}
 }

@@ -68,11 +68,16 @@ func repositoryFlowContext(forge, repository, namespace string) map[string]strin
 func TestFlow_RepositoryContextThroughPublication(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct{ forge, repository, namespace, imagePath, mapping string }{
-		{"github", "MixedOrg/My.Repo", "MixedOrg", "mixedorg/my.repo/worker", ""},
-		{"forgejo", "MixedOrg/App__Tools--CLI", "MixedOrg", "mixedorg/app__tools--cli/worker", ""},
-		{"gitlab", "Group/Sub-Group/My_Repo.v2", "Group/Sub-Group", "group/sub-group/my_repo.v2/worker", ""},
-		{"github", "MixedOrg/.github", "MixedOrg", "mixedorg/github-config", "mixedorg/github-config"},
+	// foreign is the refusal under another owner: a rule failure, or a
+	// configuration error where the mapping cannot sit under that owner.
+	for _, tc := range []struct {
+		forge, repository, namespace, imagePath, mapping string
+		foreign                                          int
+	}{
+		{"github", "MixedOrg/My.Repo", "MixedOrg", "mixedorg/my.repo/worker", "", exitValidation},
+		{"forgejo", "MixedOrg/App__Tools--CLI", "MixedOrg", "mixedorg/app__tools--cli/worker", "", exitValidation},
+		{"gitlab", "Group/Sub-Group/My_Repo.v2", "Group/Sub-Group", "group/sub-group/my_repo.v2/worker", "", exitValidation},
+		{"github", "MixedOrg/.github", "MixedOrg", "mixedorg/github-config", "mixedorg/github-config", exitConfig},
 	} {
 		t.Run(tc.forge+"/"+tc.repository, func(t *testing.T) {
 			t.Parallel()
@@ -96,13 +101,17 @@ func TestFlow_RepositoryContextThroughPublication(t *testing.T) {
 				t.Fatalf("image=%q, want %s/%s", image, host, tc.imagePath)
 			}
 
-			args = []string{"container", "validate", "namespace", "--image-name", image,
-				"--registry", host, "--enforce-namespace-on", host, "--enforce-namespace", tc.namespace}
-			if tc.mapping != "" {
-				args = append(args, "--expected-image-repository", host+"/"+tc.mapping)
-			}
-			if _, stderr, code := run(t, opts, args...); code != 0 {
-				t.Fatalf("namespace: exit=%d stderr=%s", code, stderr)
+			// The image is accepted under its own owner and refused under a
+			// foreign one, on the registry it is pushed to.
+			for owner, want := range map[string]int{tc.namespace: 0, "ForeignOrg": tc.foreign} {
+				args = []string{"container", "validate", "namespace", "--image-name", image,
+					"--repository", tc.repository, "--registry", host, "--enforce-namespace", owner}
+				if tc.mapping != "" {
+					args = append(args, "--expected-image-repository", host+"/"+tc.mapping)
+				}
+				if _, stderr, code := run(t, opts, args...); code != want {
+					t.Fatalf("namespace %s: exit=%d, want %d; stderr=%s", owner, code, want, stderr)
+				}
 			}
 
 			metadata := repositoryFlowJSON(t, opts, "container", "metadata", "--image-name", image,

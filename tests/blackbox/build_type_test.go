@@ -152,7 +152,7 @@ func TestBuildType_NPMPack(t *testing.T) {
 func TestBuildType_GradleApplication(t *testing.T) {
 	requireTool(t, "java")
 
-	proj := copyTree(t, fixture("gradle-hello"))
+	proj := copyGradleFixture(t, "gradle-hello")
 
 	_, stderr, code := run(t, runOpts{dir: proj},
 		"build", "gradle", "run", "--tasks", "build", "--build-sbom=false")
@@ -172,7 +172,7 @@ func TestBuildType_GradleApplication(t *testing.T) {
 func TestBuildType_GradleLibraryTasks(t *testing.T) {
 	requireTool(t, "java")
 
-	proj := copyTree(t, fixture("gradle-hello"))
+	proj := copyGradleFixture(t, "gradle-hello")
 
 	// Augment the build.gradle with library-publishing convention.
 	// Cheaper than a second fixture; future tests using gradle-hello

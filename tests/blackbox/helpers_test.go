@@ -776,7 +776,7 @@ func requireWorkingTool(t *testing.T, name string, args ...string) {
 		skipInOptionalProfilef(t, "%s is not on PATH", name)
 	}
 
-	cmd := exec.CommandContext(t.Context(), path, args...)
+	cmd := toolCommand(t, "", nil, path, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		skipInOptionalProfilef(t, "%s is on PATH but failed to run: %v\n%s", name, err, out)
 	}

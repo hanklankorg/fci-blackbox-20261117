@@ -71,35 +71,30 @@ func TestReleaseSign_CosignKMSRoundtrip(t *testing.T) {
 	}, "release", "sign",
 		"--method=kms",
 		"--key", priv,
-		"--release-artifacts-dir", "release-artifacts",
+		"--file", filepath.Join("release-artifacts", "app.tgz"),
 	)
 	if code != 0 {
 		t.Fatalf("sign exit %d\nstderr: %s", code, stderr)
 	}
 
-	bundle := filepath.Join(dir, "app.tgz.bundle")
+	bundle := filepath.Join(ra, "app.tgz.bundle")
 	if !fileExists(bundle) {
 		t.Fatalf("expected %s; not produced", bundle)
 	}
 
 	// cosign 3.x emits a single bundle for KMS too — no separate
 	// .sig or .pem files.
-	if fileExists(filepath.Join(dir, "app.tgz.sig")) || fileExists(filepath.Join(dir, "app.tgz.pem")) {
+	if fileExists(filepath.Join(ra, "app.tgz.sig")) || fileExists(filepath.Join(ra, "app.tgz.pem")) {
 		t.Errorf("cosign 3.x must emit only .bundle; found stray .sig or .pem")
 	}
 
-	// Verify (auto-detected method=kms because --key is supplied).
-	// The artifact path is relative to dir; we move it next to its
-	// bundle so the validate command finds the sidecar.
-	artCopy := filepath.Join(dir, "app.tgz")
-	if err := os.Rename(filepath.Join(ra, "app.tgz"), artCopy); err != nil {
-		t.Fatal(err)
-	}
-
+	// Verify (auto-detected method=kms because --key is supplied). The
+	// bundle sits beside the artifact, where the validate command finds it.
+	art := filepath.Join("release-artifacts", "app.tgz")
 	_, stderr, code = run(t, runOpts{
 		dir: dir,
 	}, "validate", "artifact-signature",
-		"--artifact", "app.tgz",
+		"--artifact", art,
 		"--key", pub,
 	)
 	if code != 0 {
@@ -107,12 +102,12 @@ func TestReleaseSign_CosignKMSRoundtrip(t *testing.T) {
 	}
 
 	// Tamper: rewrite the artifact and re-verify. Must fail.
-	if err := os.WriteFile(artCopy, []byte("tampered"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, art), []byte("tampered"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	_, stderr, code = run(t, runOpts{dir: dir}, "validate", "artifact-signature",
-		"--artifact", "app.tgz", "--key", pub)
+		"--artifact", art, "--key", pub)
 	if code != exitValidation {
 		t.Errorf("tampered artifact verify: exit %d, want 1 (EX_VALIDATION)\nstderr: %s", code, stderr)
 	}

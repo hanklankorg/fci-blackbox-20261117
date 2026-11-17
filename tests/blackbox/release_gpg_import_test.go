@@ -70,8 +70,8 @@ func TestSecurity_GPGStderrDoesNotEchoInputKey(t *testing.T) {
 	tmp := t.TempDir()
 
 	// Pass a deliberately-malformed key that contains a private-key
-	// marker. If gpg ever decided to echo input on error, our
-	// redactor must catch it before the bytes leave the process.
+	// marker. The engine refuses the armor before gpg runs; its refusal
+	// must not echo the input either.
 	malformed := "-----BEGIN PGP PRIVATE KEY BLOCK-----\nthis-is-not-base64-armor-payload\n-----END PGP PRIVATE KEY BLOCK-----\n"
 
 	_, stderr, code := run(t, runOpts{
@@ -82,22 +82,20 @@ func TestSecurity_GPGStderrDoesNotEchoInputKey(t *testing.T) {
 		},
 	}, "release", "gpg", "import")
 
-	if code == 0 {
-		t.Fatal("malformed key should fail gpg --import")
+	if code != exitDataErr {
+		t.Fatalf("malformed key exit = %d, want %d (input does not parse)\nstderr: %s", code, exitDataErr, stderr)
 	}
 
-	// The redactor replaces the body with a notice; the marker may
-	// still appear in the replacement text. What MUST NOT appear is
-	// the original payload bytes ("this-is-not-base64-armor-payload").
+	// What MUST NOT appear is the original payload bytes
+	// ("this-is-not-base64-armor-payload").
 	if strings.Contains(stderr, "this-is-not-base64-armor-payload") {
 		t.Errorf("stderr leaked the original input-key payload:\n%s", stderr)
 	}
 
 	// An empty stderr would satisfy the check above while telling the operator
-	// nothing. The failure has to still be reported — redaction that swallowed
-	// the whole diagnostic would be a different regression passing as this one.
-	assertContains(t, "import failure is still reported", stderr, "gpg --import")
-	assertContains(t, "redaction is named, not silent", stderr, "diagnostics suppressed")
+	// nothing, so the refusal itself has to be reported.
+	assertContains(t, "names the armor refusal", stderr, "gpg-import: read metadata: parse armored key:")
+	assertContains(t, "names the malformed input", stderr, "malformed input")
 }
 
 // keyResidueIn reports files under dir that look like private-key material,

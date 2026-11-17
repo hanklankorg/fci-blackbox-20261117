@@ -47,14 +47,13 @@ func checkoutMetadataServer(t *testing.T, serverName string, requests chan<- che
 // preflight owes forge's server in mode. A format that disagrees with the ref
 // fails validation: GitHub reports none, so its SHA-1 default meets the SHA-256
 // ref, as does an explicit --object-format sha1. The unsupported format the
-// Forgejo and GitLab fakes report is malformed data; only the refusal is
-// asserted for it.
+// Forgejo and GitLab fakes report is malformed data.
 func objectFormatRefusal(forge, mode string, code int) bool {
 	if forge == "github" || mode == "explicit object format" {
 		return code == exitValidation
 	}
 
-	return code != 0
+	return code == exitDataErr
 }
 
 func TestPlatformCheckout_MetadataUsesCheckoutContext(t *testing.T) {

@@ -74,7 +74,7 @@ profile.
 | `forge-ci docs` pages built into the binary | testsuite (`docs_test.go`) |
 | `plan release` runner-input refusal, the release APK of an Android application in the transfer plan, and `plan release-file-signing` (GPG or Cosign for checksums and SBOMs) | testsuite (`plan_release_test.go`) |
 | Exit-code classes, including 78 for a missing tool and 69 only for an unreachable host | testsuite (`cli_exit_codes_test.go`) |
-| `container validate artifacts` presence gate (JVM/npm container-packaging path) | testsuite (`container_validate_artifacts_test.go`) |
+| `container validate artifacts` presence gate (JVM, Go and Cargo container-packaging path) | testsuite (`container_validate_artifacts_test.go`) |
 | SLSA workflow-hardening validators: `validate isolation` (L3 job isolation), `validate event-context` (trigger allowlist), `validate job-graph` (masked-failure guard), `validate pin-reachability` (orphaned pins) | testsuite (`validate_isolation_test.go`, `validate_event_context_test.go`, `validate_job_graph_test.go`, `validate_pin_reachability_test.go`) |
 | `release provenance` SLSA-v1.0 statement generation (shape, subjects, determinism, reserved-key guard) | testsuite (`release_provenance_test.go`). Signing the statement needs OIDC/KMS and is **not here** |
 | Build->sign tamper-evidence digests: `artifact digest` (canonical content digest), `release dist-digest` + `release prepare-dist` (hand-off digest, shell-pipeline byte-compat, CI-sink emission) | testsuite (`artifact_digest_test.go`, `release_dist_digest_test.go`) |

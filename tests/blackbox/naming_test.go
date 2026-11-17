@@ -61,6 +61,9 @@ func infraFiles() []string {
 		"keys_test.go",
 		"naming_test.go",
 		"fixtures_hygiene_test.go",
+		"faketool_test.go",
+		"cleanup_test.go",
+		"subprocess_hygiene_test.go",
 		"gradle_fixtures_test.go",
 	}
 }

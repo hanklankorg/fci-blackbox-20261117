@@ -19,7 +19,6 @@
 // per-project-type presence check:
 //
 //	maven, gradle → a top-level *.jar must exist (non-recursive)
-//	npm           → any top-level file (unpacked tarball / dist)
 //	go, cargo     → any file, searched RECURSIVELY (dist/<os>-<arch>/…)
 //
 // The recursive-vs-top-level split is the load-bearing behavioural
@@ -57,7 +56,7 @@ func mkArtifactDir(t *testing.T, files ...string) string {
 	return dir
 }
 
-// TestContainerValidateArtifacts_Buckets exercises the three matcher
+// TestContainerValidateArtifacts_Buckets exercises the two matcher
 // buckets and — the point of the test — the recursive-vs-top-level
 // distinction between them. A jar buried in a subdir must NOT satisfy
 // maven/gradle (non-recursive), while a binary buried under
@@ -82,10 +81,9 @@ func TestContainerValidateArtifacts_Buckets(t *testing.T) {
 		{"gradle_toplevel_jar_ok", "gradle", []string{"libs-app.jar"}, exOK, ""},
 		{"gradle_jar_in_subdir_ignored", "gradle", []string{"libs/app.jar"}, exitValidation, "no Gradle artifacts in"},
 
-		// npm: any top-level file (the unpacked tarball / dist tree).
-		{"npm_any_toplevel_file_ok", "npm", []string{"package.tgz"}, exOK, ""},
-		{"npm_dist_file_toplevel_ok", "npm", []string{"index.js"}, exOK, ""},
-		{"npm_empty_rejected", "npm", nil, exitValidation, "no NPM artifacts in"},
+		// npm: not a type of this verb; container extract-npm-tarball
+		// checks that the packed package arrived.
+		{"npm_is_refused", "npm", []string{"package.tgz"}, exitUsage, "unknown project type: npm"},
 
 		// go/cargo: any file, RECURSIVELY — binaries land at
 		// dist/<goos>-<goarch>/<name>-<goos>-<goarch>.
@@ -182,7 +180,6 @@ func TestContainerValidateArtifacts_AllEmptyArtifactsAreRefused(t *testing.T) {
 	}{
 		{"maven_only_an_empty_jar", "maven", nil, []string{"app-1.0.0.jar"}, exitValidation},
 		{"go_only_an_empty_binary", "go", nil, []string{"linux-amd64/tool-linux-amd64"}, exitValidation},
-		{"npm_only_an_empty_file", "npm", nil, []string{"index.js"}, exitValidation},
 		{"maven_one_real_jar_beside_an_empty_one", "maven", []string{"app-1.0.0.jar"}, []string{"sources.jar"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -9,15 +9,18 @@
 // the full commit-changelog-release orchestration — real git, real SSH
 // commit signing, a loopback SSH host-key handshake, and a fake `ssh`
 // transport serving git-receive-pack / git-upload-pack from a local bare repo.
+// The fakes are the test binary itself (faketool_test.go).
 package blackbox
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,21 +28,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
-
-// writeFakeTool writes an executable shell script into dir.
-func writeFakeTool(t *testing.T, dir, name, body string) {
-	t.Helper()
-
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/usr/bin/env bash\nset -euo pipefail\n"+body), 0o755); err != nil { //nolint:gosec // test fixture must be executable.
-		t.Fatal(err)
-	}
-}
-
-// shellQuote single-quotes s for a fake tool script, so a temp path with
-// spaces, quotes or `$` stays one literal word.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
 
 // suitePATH returns the PATH the run() helper would compute, so fake-tool
 // dirs can be PREPENDED without losing the mise-augmented lookup.
@@ -156,9 +144,9 @@ func TestDeriveRelease_PrereleaseRequiresExplicitPolicy(t *testing.T) {
 // --- G2: render-changelog backend contract + secret hygiene --------------
 
 // renderFixture builds a real repo (main branch, tracked CHANGELOG.md, bare
-// origin) plus fake git-chglog/git-cliff renderers that log their argv and
-// booby-trap on inherited secrets.
-func renderFixture(t *testing.T) (repo, fakeBin, renderLog string) {
+// origin) plus fake git-chglog/git-cliff renderers (fakeRenderer), and
+// returns the repo and the fakes' directory.
+func renderFixture(t *testing.T) (repo, fakeBin string) {
 	t.Helper()
 	requireTool(t, "git")
 
@@ -187,28 +175,31 @@ func renderFixture(t *testing.T) (repo, fakeBin, renderLog string) {
 		mustGit(t, runGit, "push", "-q", "origin", "main")
 	})
 
-	fakeBin = t.TempDir()
-	renderLog = filepath.Join(t.TempDir(), "render.log")
+	return repo, installFakeTools(t, "git-chglog", "git-cliff")
+}
 
-	boobyTrap := `if [ -n "${SSH_SIGNING_KEY:-}" ] || [ -n "${FORGEJO_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
-  echo "ERROR: renderer inherited a signing/API secret" >&2
-  exit 97
-fi
-`
-	writeFakeTool(t, fakeBin, "git-chglog", boobyTrap+`printf 'git-chglog %s\n' "$*" >>`+shellQuote(renderLog)+`
-case "$*" in
-  *--output*) printf '# v9.9.1\n\n- change\n' >CHANGELOG.md ;;
-  *) printf 'body from chglog\n' ;;
-esac
-`)
-	writeFakeTool(t, fakeBin, "git-cliff", boobyTrap+`printf 'git-cliff %s\n' "$*" >>`+shellQuote(renderLog)+`
-case "$*" in
-  *--output*) printf '# v9.9.2\n\n- cliff change\n' >CHANGELOG.md ;;
-  *) printf 'body from cliff\n' ;;
-esac
-`)
+// fakeRenderer stands in for git-chglog and git-cliff. It refuses to run with
+// a signing or API secret in its environment, writes CHANGELOG.md when asked
+// for --output, and prints a commit body otherwise.
+func fakeRenderer(_ string, args []string) int {
+	for _, secret := range []string{"SSH_SIGNING_KEY", "FORGEJO_TOKEN", "GITHUB_TOKEN"} {
+		if os.Getenv(secret) != "" {
+			fmt.Fprintln(os.Stderr, "ERROR: renderer inherited a signing/API secret")
 
-	return repo, fakeBin, renderLog
+			return 97
+		}
+	}
+	name := filepath.Base(os.Args[0])
+	if strings.Contains(strings.Join(args, " "), "--output") {
+		if err := os.WriteFile("CHANGELOG.md", []byte("# rendered by "+name+"\n"), 0o600); err != nil {
+			return fakeFailed("%v", err)
+		}
+
+		return 0
+	}
+	fmt.Println("body from " + name)
+
+	return 0
 }
 
 // TestRenderChangelogFixture_BoobyTrapIsArmed is the control for the secret
@@ -216,15 +207,15 @@ esac
 // 97 when they see SSH_SIGNING_KEY / FORGEJO_TOKEN / GITHUB_TOKEN, and the test
 // concludes the scrub worked because render-changelog exited 0.
 //
-// The conclusion only follows if the trap can actually fire. A mangled trap —
-// a bad quote, a renamed variable, a `set -e` interaction — makes the renderer
-// exit 0 regardless, and the hygiene test passes at full confidence while
-// checking nothing. Run the fixture's own renderer directly with a secret in
-// the environment and require the refusal.
+// The conclusion only follows if the trap can actually fire. A mangled trap,
+// such as a misspelt variable name, makes the renderer exit 0 regardless, and
+// the hygiene test passes at full confidence while checking nothing. Run the
+// fixture's own renderer directly with a secret in the environment and
+// require the refusal.
 func TestRenderChangelogFixture_BoobyTrapIsArmed(t *testing.T) {
 	t.Parallel()
 
-	_, fakeBin, _ := renderFixture(t)
+	_, fakeBin := renderFixture(t)
 
 	for _, secret := range []string{"SSH_SIGNING_KEY", "FORGEJO_TOKEN", "GITHUB_TOKEN"} {
 		t.Run(secret, func(t *testing.T) {
@@ -259,11 +250,11 @@ func TestRenderChangelog_BackendsAndSecretHygiene(t *testing.T) {
 	for _, tc := range []struct {
 		backend, tag, changelogCfg, bodyCfg, wantBody string
 	}{
-		{"git-chglog", "v9.9.1", ".chglog/config.yml", ".chglog/body.yml", "body from chglog"},
-		{"git-cliff", "v9.9.2", "cliff.toml", "cliff-body.toml", "body from cliff"},
+		{"git-chglog", "v9.9.1", ".chglog/config.yml", ".chglog/body.yml", "body from git-chglog"},
+		{"git-cliff", "v9.9.2", "cliff.toml", "cliff-body.toml", "body from git-cliff"},
 	} {
 		t.Run(tc.backend, func(t *testing.T) {
-			repo, fakeBin, renderLog := renderFixture(t)
+			repo, fakeBin := renderFixture(t)
 			repositoryURL := "https://forgejo.example/fixture/consumer"
 
 			_, stderr, code := run(t, runOpts{
@@ -287,7 +278,7 @@ func TestRenderChangelog_BackendsAndSecretHygiene(t *testing.T) {
 				t.Fatalf("render-changelog exit %d\nstderr: %s", code, stderr)
 			}
 
-			log := readFile(t, renderLog)
+			log := fakeCalls(t, fakeBin)
 			assertContains(t, "changelog render argv", log, "--config "+tc.changelogCfg)
 			assertContains(t, "body render argv", log, "--config "+tc.bodyCfg)
 			assertContains(t, "next-tag argv", log, tc.tag)
@@ -350,6 +341,59 @@ func prepareHostKeyServer(t *testing.T, keyPath string) (string, string) {
 	return "127.0.0.1", port
 }
 
+// fakeSSH is the Git transport. It refuses an inherited signing key, keeps a
+// copy of the -F config and its path, and serves the remote Git command from
+// the bare repository remote.git in its directory.
+func fakeSSH(dir string, args []string) int {
+	if os.Getenv("SSH_SIGNING_KEY") != "" {
+		fmt.Fprintln(os.Stderr, "ERROR: transport inherited SSH_SIGNING_KEY")
+
+		return 97
+	}
+	config := ""
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "-F", "-o", "-i", "-l", "-p", "-E":
+			if len(args) < 2 {
+				return fakeFailed("%s needs a value", args[0])
+			}
+			if args[0] == "-F" {
+				config = args[1]
+			}
+			args = args[2:]
+		default:
+			args = args[1:]
+		}
+	}
+	if config == "" || len(args) != 2 {
+		return fakeFailed("want -F config, a target and one remote command, got %q", args)
+	}
+	body, err := os.ReadFile(config)
+	if err == nil {
+		err = errors.Join(os.WriteFile(filepath.Join(dir, "ssh-config"), body, 0o600),
+			os.WriteFile(filepath.Join(dir, "ssh-config-path"), []byte(config), 0o600))
+	}
+	if err != nil {
+		return fakeFailed("%v", err)
+	}
+	service, _, _ := strings.Cut(args[1], " ")
+	if service != "git-receive-pack" && service != "git-upload-pack" {
+		return fakeFailed("unexpected remote command %q", args[1])
+	}
+	git := exec.CommandContext(context.Background(), "git", strings.TrimPrefix(service, "git-"), filepath.Join(dir, "remote.git")) //nolint:gosec // one of the two Git services, on the fake's own repository.
+	git.Stdin, git.Stdout, git.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := git.Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
+		}
+
+		return fakeFailed("%v", err)
+	}
+
+	return 0
+}
+
 func TestCommitChangelogRelease_SignsPushesAndCleansUp(t *testing.T) {
 	t.Parallel()
 
@@ -378,7 +422,11 @@ func TestCommitChangelogRelease_SignsPushesAndCleansUp(t *testing.T) {
 
 	fingerprint := fpFields[1] // "256 SHA256:... comment (ED25519)"
 
-	bare := t.TempDir()
+	// The host key comes from the real handshake above. The fake ssh
+	// (fakeSSH) serves Git's upload/receive protocol from the bare repository
+	// in its directory and booby-traps inherited signing material.
+	fakeBin := installFakeTools(t, "ssh")
+	bare := filepath.Join(fakeBin, "remote.git")
 	gitAt(t, "", "init", "--bare", bare)
 
 	// Repo state as prepare leaves it: tracked-but-modified CHANGELOG plus
@@ -405,59 +453,6 @@ func TestCommitChangelogRelease_SignsPushesAndCleansUp(t *testing.T) {
 		}
 	}
 
-	// The host key comes from the real handshake above. A fake ssh command
-	// serves Git's upload/receive protocol from the bare repository and
-	// booby-traps inherited signing material.
-	fakeBin := t.TempDir()
-	boobyTrap := `if [ -n "${SSH_SIGNING_KEY:-}" ]; then
-  echo "ERROR: transport inherited SSH_SIGNING_KEY" >&2
-  exit 97
-fi
-`
-	sshConfigCopy := filepath.Join(t.TempDir(), "ssh-config")
-	sshConfigPathLog := filepath.Join(t.TempDir(), "ssh-config-path")
-	writeFakeTool(t, fakeBin, "ssh", boobyTrap+fmt.Sprintf(`# Skip ssh options; the trailing argument is the remote command.
-config=
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -F) config="${2:?}"; shift 2 ;;
-    -o|-i|-l|-p|-E) shift 2 ;;
-    -*) shift ;;
-    *) break ;;
-  esac
-done
-
-if [ -z "$config" ]; then
-  echo "fake ssh: missing -F config" >&2
-  exit 98
-fi
-if ! grep -Fqx '  HostName %s' "$config" ||
-   ! grep -Fqx '  Port %s' "$config" ||
-   ! grep -Fqx '  User git' "$config" ||
-   ! grep -Fqx '  StrictHostKeyChecking yes' "$config"; then
-  echo "fake ssh: generated config does not carry the required endpoint and strict host checking" >&2
-  exit 98
-fi
-printf '%%s\n' "$config" >%s
-cp "$config" %s
-
-target="${1:?}"
-shift
-if [ "$target" != "git@%s" ]; then
-  echo "fake ssh: unexpected target: $target" >&2
-  exit 98
-fi
-if [ $# -eq 0 ]; then
-  exit 1
-fi
-cmd="$1"
-case "${cmd}" in
-  git-receive-pack*) exec git receive-pack %s ;;
-  git-upload-pack*) exec git upload-pack %s ;;
-  *) echo "fake ssh: unexpected command: ${cmd}" >&2; exit 1 ;;
-esac
-`, host, port, shellQuote(sshConfigPathLog), shellQuote(sshConfigCopy), host, shellQuote(bare), shellQuote(bare)))
-
 	outFile := filepath.Join(t.TempDir(), "outputs")
 	env := map[string]string{
 		"PATH":                             fakeBin + string(os.PathListSeparator) + suitePATH(),
@@ -477,7 +472,7 @@ esac
 	if code != exitValidation || !strings.Contains(stderr, "fingerprint mismatch") {
 		t.Fatalf("wrong host pin exit=%d, want fingerprint refusal: %s", code, stderr)
 	}
-	if fileExists(sshConfigPathLog) || gitAt(t, repo, "rev-parse", "HEAD") != initial {
+	if fakeCalls(t, fakeBin) != "" || gitAt(t, repo, "rev-parse", "HEAD") != initial {
 		t.Fatal("wrong host pin reached the Git transport or changed the source")
 	}
 	env["RELEASE_GIT_HOST_KEY_FINGERPRINT"] = fingerprint
@@ -517,10 +512,12 @@ esac
 	// prove the annotated tag object was signed.
 	gitAt(t, repo, "-c", "gpg.format=ssh", "-c", "gpg.ssh.allowedSignersFile="+signers, "tag", "-v", "v3.0.0")
 
-	sshConfig := readFile(t, sshConfigCopy)
-	assertContains(t, "SSH config hostname", sshConfig, "  HostName "+host+"\n")
-	assertContains(t, "SSH config port", sshConfig, "  Port "+port+"\n")
-	sshConfigPath := strings.TrimSpace(readFile(t, sshConfigPathLog))
+	assertContains(t, "SSH target", fakeCalls(t, fakeBin), " git@"+host+" ")
+	sshConfig := readFile(t, filepath.Join(fakeBin, "ssh-config"))
+	for _, line := range []string{"HostName " + host, "Port " + port, "User git", "StrictHostKeyChecking yes"} {
+		assertContains(t, "SSH config", sshConfig, "  "+line+"\n")
+	}
+	sshConfigPath := readFile(t, filepath.Join(fakeBin, "ssh-config-path"))
 	if !filepath.IsAbs(sshConfigPath) {
 		t.Fatalf("fake ssh logged no absolute config path: %q", sshConfigPath)
 	}
