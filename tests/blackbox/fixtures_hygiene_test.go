@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -166,69 +168,58 @@ func TestFixtures_GradleWrapperJarMatchesCommittedChecksum(t *testing.T) {
 	}
 }
 
+// TestFixtures_ToolchainsArePinned checks the properties that make a
+// fixture's toolchain inputs pinned, over every such file the fixtures ship,
+// so a new fixture is covered without editing this test:
+//
+//   - every Containerfile base names an explicit tag or digest, never an
+//     implicit or explicit `latest`;
+//   - a Go or Rust builder image and every rust-toolchain.toml use the version
+//     .mise.toml pins, so the fixtures build with the toolchain the suite runs;
+//   - every Gradle wrapper names an exact distribution version.
+//
+// TestFixtures_GradleWrapperJarMatchesCommittedChecksum covers the wrapper jar.
 func TestFixtures_ToolchainsArePinned(t *testing.T) {
 	t.Parallel()
 
-	pinned := map[string]string{
-		"cargo-hello/rust-toolchain.toml":                          `channel = "1.94.0"`,
-		"cargo-workspace/rust-toolchain.toml":                      `channel = "1.94.0"`,
-		"cargo-hello/Containerfile":                                "rust:1.94.0-slim-bookworm",
-		"go-hello/Containerfile":                                   "golang:1.27.2-bookworm",
-		"gradle-hello/gradle/wrapper/gradle-wrapper.properties":    "gradle-9.5.1-bin.zip",
-		"gradle-hello/gradle/wrapper/gradle-wrapper.jar.sha256":    "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7",
-		"android-library/Containerfile":                            "ghcr.io/cirruslabs/android-sdk:35@sha256:c724009e305b4607157287624033ab97f319af44c244bfc9f73b6293f3bb01b9",
-		"android-library/gradle/wrapper/gradle-wrapper.properties": "gradle-8.11.1-bin.zip",
+	mise := readFile(t, filepath.Join(suiteDir, ".mise.toml"))
+	want := map[string]string{
+		"golang": miseVersion(t, mise, `(?m)^go = "([^"]+)"`),
+		"rust":   miseVersion(t, mise, `(?m)^rust = \{ version = "([^"]+)"`),
 	}
-
-	for rel, want := range pinned {
-		body := readFile(t, filepath.Join(suiteDir, "fixtures", rel))
-		if !strings.Contains(body, want) {
-			t.Errorf("%s does not contain pinned input %q", rel, want)
-		}
-	}
-
-	assertEveryToolchainFileIsListed(t, pinned)
-}
-
-// assertEveryToolchainFileIsListed fails when a fixture ships a file of a kind
-// this guard pins but which the table above does not name.
-//
-// The table is complete today, which is exactly why it needs this: a new
-// fixture arriving with its own Containerfile would be unpinned and the guard
-// would keep reporting green, because it only ever checks the files it already
-// knows about. Adding a fixture should fail here until someone pins it.
-func assertEveryToolchainFileIsListed(t *testing.T, pinned map[string]string) {
-	t.Helper()
 
 	root := filepath.Join(suiteDir, "fixtures")
-
-	kinds := map[string]bool{
-		"Containerfile":             true,
-		"rust-toolchain.toml":       true,
-		"gradle-wrapper.properties": true,
-	}
-
 	found := 0
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+		if err != nil || d.IsDir() {
 			return err
 		}
-
-		if d.IsDir() || !kinds[d.Name()] {
-			return nil
-		}
-
-		found++
 
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			return relErr
 		}
 
-		if _, listed := pinned[filepath.ToSlash(rel)]; !listed {
-			t.Errorf("fixtures/%s declares a toolchain but is not pinned by this guard; "+
-				"add it to the table with the exact version it must carry", filepath.ToSlash(rel))
+		rel = filepath.ToSlash(rel)
+
+		switch d.Name() {
+		case "Containerfile":
+			found++
+
+			assertContainerfileBasesPinned(t, rel, readFile(t, path), want)
+		case "rust-toolchain.toml":
+			found++
+
+			if !strings.Contains(readFile(t, path), `channel = "`+want["rust"]+`"`) {
+				t.Errorf("%s: channel is not the .mise.toml rust %s", rel, want["rust"])
+			}
+		case "gradle-wrapper.properties":
+			found++
+
+			if !gradleDistributionRE.MatchString(readFile(t, path)) {
+				t.Errorf("%s: distributionUrl does not name an exact gradle-X.Y[.Z] distribution", rel)
+			}
 		}
 
 		return nil
@@ -238,6 +229,70 @@ func assertEveryToolchainFileIsListed(t *testing.T, pinned map[string]string) {
 	}
 
 	if found == 0 {
-		t.Fatalf("found no toolchain files under %s; the completeness check proved nothing", root)
+		t.Fatalf("found no toolchain files under %s; this guard proved nothing", root)
 	}
 }
+
+// assertContainerfileBasesPinned checks every FROM of one Containerfile. A
+// base that is `scratch` or an earlier stage is not an image reference.
+func assertContainerfileBasesPinned(t *testing.T, rel, body string, toolchain map[string]string) {
+	t.Helper()
+
+	stages := map[string]bool{"scratch": true}
+
+	for _, line := range strings.Split(body, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "FROM") {
+			continue
+		}
+
+		fields = slices.DeleteFunc(fields[1:], func(f string) bool { return strings.HasPrefix(f, "--") })
+		if len(fields) == 0 {
+			t.Errorf("%s: %q names no base", rel, line)
+
+			continue
+		}
+
+		if len(fields) == 3 && strings.EqualFold(fields[1], "AS") {
+			stages[fields[2]] = true
+		}
+
+		if image := fields[0]; !stages[image] {
+			assertImagePinned(t, rel, image, toolchain)
+		}
+	}
+}
+
+func assertImagePinned(t *testing.T, rel, image string, toolchain map[string]string) {
+	t.Helper()
+
+	name, digest, _ := strings.Cut(image, "@")
+	repo, tag := name, ""
+
+	if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
+		repo, tag = name[:i], name[i+1:]
+	}
+
+	if digest == "" && (tag == "" || tag == "latest") {
+		t.Errorf("%s: base %q names no explicit tag or digest", rel, image)
+	}
+
+	if version, ok := toolchain[repo[strings.LastIndex(repo, "/")+1:]]; ok && !strings.HasPrefix(tag, version+"-") {
+		t.Errorf("%s: builder %q is not the .mise.toml version %s", rel, image, version)
+	}
+}
+
+// miseVersion returns the first submatch of pattern in .mise.toml.
+func miseVersion(t *testing.T, mise, pattern string) string {
+	t.Helper()
+
+	m := regexp.MustCompile(pattern).FindStringSubmatch(mise)
+	if m == nil {
+		t.Fatalf(".mise.toml has no version matching %s", pattern)
+	}
+
+	return m[1]
+}
+
+//nolint:gochecknoglobals // read-only compiled pattern.
+var gradleDistributionRE = regexp.MustCompile(`(?m)^distributionUrl=\S*/gradle-\d+\.\d+(\.\d+)?-bin\.zip$`)

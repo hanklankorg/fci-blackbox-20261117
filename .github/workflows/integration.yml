@@ -182,32 +182,8 @@ jobs:
             printf 'oversized_evidence=omitted-with-bounded-record\n'
           } >"$EVIDENCE_DIR/metadata.txt"
 
-      - name: Set up Go
-        timeout-minutes: 4
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
-        with:
-          go-version-file: forge-ci-blackbox-tests/go.mod
-          cache: false
-
-      - name: Set up pinned Java
-        timeout-minutes: 4
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          distribution: temurin
-          java-version: "25.0.2+10.0.LTS"
-
-      - name: Set up pinned Rust
-        timeout-minutes: 8
-        run: |
-          rustup toolchain install 1.94.0 --profile minimal
-          rustup default 1.94.0
-
-      - name: Set up pinned Node.js
-        timeout-minutes: 4
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: "24.13.1"
-
+      # .mise.toml is the one authority for tool versions; the steps below
+      # install exactly what `just install-dev-tools` installs locally.
       - name: Set up pinned mise
         timeout-minutes: 4
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
@@ -217,14 +193,16 @@ jobs:
           cache: false
           add_shims_to_path: false
 
-      - name: Install pinned Maven
-        timeout-minutes: 7
+      # Go, Java and Rust first, then the rest with those runtimes active, so
+      # the Cargo and Go tool installs need no global rustup default.
+      - name: Install pinned tools
+        timeout-minutes: 20
         working-directory: forge-ci-blackbox-tests
         run: |
           set -euo pipefail
-          command -v mise >/dev/null
-          mise install maven@3.10.0
-          mise bin-paths maven@3.10.0 >>"$GITHUB_PATH"
+          mise trust
+          mise install go java rust
+          mise exec --no-deps go java rust -- mise install
 
       - name: Install floor-checked distro Buildah
         timeout-minutes: 7
@@ -232,28 +210,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq buildah
           buildah --version
-
-      - name: Install cargo-cyclonedx
-        timeout-minutes: 10
-        run: cargo install --locked cargo-cyclonedx --version 0.5.9
-
-      - name: Install cyclonedx-gomod
-        timeout-minutes: 7
-        run: |
-          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
-          printf '%s\n' "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
-
-      - name: Install syft
-        timeout-minutes: 4
-        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          syft-version: "v1.49.0"
-
-      - name: Install cosign
-        timeout-minutes: 4
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: "v3.1.4"
 
       # Cache only public inputs whose ecosystems verify content against
       # go.sum/Cargo.lock. Keep Maven/Gradle/npm, Buildah storage, Sigstore
@@ -272,7 +228,7 @@ jobs:
       - name: Verify go vet (testsuite)
         timeout-minutes: 5
         working-directory: forge-ci-blackbox-tests
-        run: go vet -tags=blackbox ./tests/blackbox/
+        run: mise exec -- go vet -tags=blackbox ./tests/blackbox/
 
       # The strict profile's refusals (a selected test, a disabled egress
       # audit), the drift-target guard and the evidence scripts, before the
@@ -280,7 +236,7 @@ jobs:
       - name: Validate strict profile contract
         timeout-minutes: 5
         working-directory: forge-ci-blackbox-tests
-        run: ./scripts/validate-strict-profile-contract.sh
+        run: mise exec -- ./scripts/validate-strict-profile-contract.sh
 
       - name: Run strict compatibility tests
         id: strict-tests
@@ -295,7 +251,7 @@ jobs:
         run: |
           set -euo pipefail
           export LC_ALL=C
-          go test -json -tags=blackbox -count=1 -timeout 35m ./tests/blackbox/... 2>&1 |
+          mise exec -- go test -json -tags=blackbox -count=1 -timeout 35m ./tests/blackbox/... 2>&1 |
             sed -u -E \
               -e 's/(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})/[REDACTED]/g' \
               -e 's#(Authorization: (Basic|Bearer) )[A-Za-z0-9._~+/=-]+#\1[REDACTED]#g' |
